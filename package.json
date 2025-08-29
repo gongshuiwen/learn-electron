@@ -4,10 +4,10 @@
   "description": "My first electron app",
   "license": "MIT",
   "author": "gongshuiwen",
-  "type": "commonjs",
-  "main": "main.js",
+  "type": "module",
+  "main": "dist/main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "tsc && electron .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {
