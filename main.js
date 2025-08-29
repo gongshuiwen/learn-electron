@@ -2,6 +2,11 @@ const { app, BrowserWindow, ipcMain } = require('electron/main')
 const { updateElectronApp } = require('update-electron-app')
 const path = require('node:path')
 
+if (require('electron-squirrel-startup')) {
+  app.quit()
+  return
+}
+
 updateElectronApp();
 
 const createWindow = () => {
