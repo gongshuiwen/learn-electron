@@ -4,7 +4,7 @@
   "description": "My first electron app",
   "license": "MIT",
   "author": "gongshuiwen",
-  "type": "commonjs",
+  "type": "module",
   "main": "main.js",
   "repository": {
     "type": "git",
