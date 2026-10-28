@@ -92,6 +92,55 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   assert.deepEqual(errors, [])
 })
 
+test('A second instance restores the existing window and exits', { timeout: 30000 }, async (t) => {
+  const profile = await mkdtemp(join(tmpdir(), 'learn-electron-single-instance-'))
+  let desktop
+  t.after(async () => {
+    try {
+      await desktop?.close()
+    } finally {
+      await rm(profile, { recursive: true, force: true })
+    }
+  })
+  desktop = await electron.launch({
+    args: [root, `--user-data-dir=${profile}`],
+    cwd: root,
+    chromiumSandbox: true,
+    env: environment,
+    timeout: 15000,
+  })
+  await desktop.firstWindow()
+  const pid = await desktop.evaluate(async ({ app, BrowserWindow }) => {
+    if (!app.hasSingleInstanceLock()) throw new Error('Missing single-instance lock')
+    const window = BrowserWindow.getAllWindows()[0]
+    if (!window.isVisible()) await new Promise((resolve) => window.once('show', resolve))
+    // Xvfb has no window manager to minimize a window.
+    if (process.platform === 'linux') window.hide()
+    else {
+      await new Promise((resolve) => {
+        window.once('minimize', resolve)
+        window.minimize()
+      })
+    }
+    return process.pid
+  })
+
+  // execFile rejects if the second process fails or stays running past the timeout.
+  await promisify(execFile)(electronPath, [root, `--user-data-dir=${profile}`], {
+    env: environment,
+    timeout: 10000,
+  })
+  assert.deepEqual(
+    await desktop.evaluate(async ({ BrowserWindow }) => {
+      const windows = BrowserWindow.getAllWindows()
+      const window = windows[0]
+      if (window.isMinimized()) await new Promise((resolve) => window.once('restore', resolve))
+      return { pid: process.pid, windows: windows.length, visible: window.isVisible() }
+    }),
+    { pid, windows: 1, visible: true },
+  )
+})
+
 test('Window state survives restart and recovers invalid files', { timeout: 60000 }, async (t) => {
   const profile = await mkdtemp(join(tmpdir(), 'learn-electron-window-'))
   const stateFile = join(profile, 'window-state.json')

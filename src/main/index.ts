@@ -10,6 +10,8 @@ import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
 
+if (!app.requestSingleInstanceLock()) app.exit(0)
+
 log.transports.file.resolvePathFn = () => join(app.getPath('userData'), 'logs', 'main.log')
 log.transports.ipc.level = false
 
@@ -117,6 +119,16 @@ app
     })
 
     await createWindow()
+    app.on('second-instance', () => {
+      const window = BrowserWindow.getAllWindows()[0]
+      if (!window) {
+        void createWindow().catch(handleStartupError)
+        return
+      }
+      if (window.isMinimized()) window.restore()
+      window.show()
+    })
+
     void checkForAppUpdates().catch((error: unknown) => {
       log.error('Unable to check for application updates:', error)
     })
