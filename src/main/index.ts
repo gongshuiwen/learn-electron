@@ -6,7 +6,7 @@ import { IPC_CHANNELS } from '../shared/ipc'
 import type { AppInfo } from '../shared/ipc'
 import { readWindowState, saveWindowState } from './window-state'
 import { setTheme, windowBackground } from './theme'
-import { readSettings } from './settings'
+import { getSettingsStore } from './settings'
 
 const rendererURL =
   !app.isPackaged && process.env.ELECTRON_RENDERER_URL
@@ -78,7 +78,7 @@ function handleStartupError(error: unknown): void {
 app
   .whenReady()
   .then(async () => {
-    nativeTheme.themeSource = readSettings().theme
+    nativeTheme.themeSource = getSettingsStore().get('theme')
     nativeTheme.on('updated', () => {
       for (const window of BrowserWindow.getAllWindows()) {
         window.setBackgroundColor(windowBackground())

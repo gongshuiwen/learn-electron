@@ -31,7 +31,7 @@ npm run dev
 
 首页的主题选择支持跟随系统、浅色和深色，选择后立即保存到 `userData/settings.json`。启动时先恢复主题，再创建窗口；配置缺失或损坏时跟随系统。页面通过 Tailwind 的 `dark:` 样式响应 Electron 原生配色，无需额外的主题状态库或事件桥接。保存失败时保留原主题并显示错误提示。
 
-应用设置由主进程的 `settings.ts` 读写，目前只包含 `{ "theme": "system" }`。缺失或无效字段使用默认值；保存时先写临时文件，再替换正式文件。窗口位置仍保存在独立的 `window-state.json` 中。
+应用设置使用 [electron-store](https://github.com/sindresorhus/electron-store)，仅在主进程的 `settings.ts` 中创建存储实例，目前只包含 `{ "theme": "system" }`。Schema 定义允许的值和默认值，缺失字段自动补齐；`clearInvalidConfig` 在 JSON 损坏或 Schema 校验失败时将配置重置为默认值并写回。文件读写和原子保存由库处理，写入失败仍通过 IPC 显示提示。窗口位置仍保存在独立的 `window-state.json` 中。
 
 ## 常用命令
 
@@ -72,7 +72,7 @@ src/
   main/index.ts                  # Electron 主进程：窗口生命周期、IPC 处理
   main/window-state.ts           # 窗口状态保存与恢复
   main/theme.ts                  # 主题偏好与窗口背景
-  main/settings.ts               # 带默认值的轻量设置持久化
+  main/settings.ts               # electron-store 实例、类型和 Schema
   preload/index.ts               # contextBridge：只暴露明确的桌面 API
   shared/ipc.ts                  # IPC 通道、请求返回值和桥接接口类型
   renderer/
@@ -100,7 +100,7 @@ tests/example.test.mjs            # 可随示例页面替换或删除的交互�
 - 窗口启用 `contextIsolation` 和 `sandbox`，关闭 `nodeIntegration`。渲染进程通过 `window.electronAPI` 调用允许的接口，不直接访问 Node.js 或 `ipcRenderer`。
 - 默认拒绝浏览器权限检查和请求。需要通知、摄像头等能力时，在主进程的 `setPermissionCheckHandler` 和 `setPermissionRequestHandler` 中按具体权限与来源放行，并同步调整相关测试。
 - 新增桌面能力时，在 `src/shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。所有 IPC 接口校验调用方的窗口主页面和 URL；`getTheme` / `setTheme` 读取与保存主题，主进程只接受 `system`、`light`、`dark` 三种值。其他用户输入或外部数据按实际需要添加运行时校验。
-- 新增实际设置时，在 `settings.ts` 的 `AppSettings`、默认值和读取校验中添加字段，通过对应的具体 IPC 接口更新；不向页面开放任意文件路径或任意键值写入。
+- 新增实际设置时，在 `settings.ts` 的 `AppSettings` 和 Schema 中添加字段及默认值，通过对应的具体 IPC 接口更新；不向页面开放任意文件路径或任意键值写入，也不在 preload 或渲染进程导入 `electron-store`。
 - HTML 的 CSP 由 Vite 插件按环境注入：开发时允许 React Fast Refresh、样式热更新和本地 WebSocket；编译产物使用更严格的策略。
 - 提交前运行 `npm run check` 和 `npm run test:smoke`（已包含 build）。依赖使用 npm 管理，并提交 `package-lock.json`；`out/` 和类型检查缓存不入库。
 - 锁文件使用 npm 官方 registry 的下载地址。需要镜像时，通过本机 npm registry 配置选择，无需在模板中固定镜像地址。修改示例页面后，还应运行 `npm run test:example`。

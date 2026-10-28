@@ -1,12 +1,12 @@
 import { nativeTheme } from 'electron'
 import { isThemeSource } from '../shared/ipc'
 import type { ThemeSource } from '../shared/ipc'
-import { saveSettings } from './settings'
+import { getSettingsStore } from './settings'
 
 export function setTheme(value: unknown): ThemeSource {
   if (!isThemeSource(value)) throw new Error('Invalid theme')
   // Only apply the selection after it has been saved successfully.
-  saveSettings({ theme: value })
+  getSettingsStore().set('theme', value)
   nativeTheme.themeSource = value
   return value
 }
