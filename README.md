@@ -1,11 +1,11 @@
 # Learn Electron
 
-Electron + TypeScript + React + Tailwind CSS 桌面应用基础项目，使用 electron-vite 管理本地开发、热更新和源码编译。
+Electron + TypeScript + React + Tailwind CSS 桌面应用基础项目，使用 electron-vite 管理本地开发、热更新和源码编译，使用 electron-builder 打包应用。
 
 ## 使用此模板
 
 1. 将项目复制到自己的仓库，修改 `package.json` 的 `name`、`version`、`description` 和 `author`，然后运行 `npm install --package-lock-only` 同步锁文件。
-2. 修改 `src/renderer/index.html` 的页面标题，以及本 README 的项目名称和说明。
+2. 修改 `src/renderer/index.html` 的页面标题、`electron-builder.yml` 的 `appId` 和 `productName`，以及本 README 的项目名称和说明。`appId` 应使用自己的唯一标识，发布后保持稳定。
 3. 替换 `src/renderer/src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
 4. 按需扩展 `src/shared/ipc.ts`、主进程和 preload 的具体接口。基础测试使用 `getAppInfo` 检查 IPC，替换该接口时同步更新测试。
 5. 模板采用 [MIT 许可证](LICENSE)，使用模板代码时保留原有版权和许可声明，可为新增代码补充自己的版权信息。
@@ -43,11 +43,28 @@ npm run dev
 | `npm run format`       | 使用 Prettier 格式化代码                             |
 | `npm run check`        | 执行类型、lint 和格式检查                            |
 | `npm run build`        | 检查类型并编译源码到 `out/`                          |
+| `npm run pack`         | 编译并生成当前平台的可运行应用目录到 `dist/`         |
+| `npm run dist`         | 编译并生成 Windows NSIS 安装包到 `dist/`             |
 | `npm run preview`      | 在 Electron 中运行已有的 `out/` 产物（先执行 build） |
 | `npm run test:smoke`   | 编译并运行 Electron 启动回归检查                     |
 | `npm run test:example` | 编译并检查示例页面的计数器与应用信息交互             |
 
-`build` 只生成本地运行所需的 JavaScript、HTML 和 CSS。本阶段未接入 Electron Forge、electron-builder、安装包制作、签名、自动更新或发布流程。
+`build` 只编译源码；`pack` 和 `dist` 会先执行 `build`，再由 electron-builder 打包 Electron 运行时和应用。两个打包命令均关闭自动发布。
+
+## 打包应用
+
+在 Windows 上运行：
+
+```sh
+npm run pack
+npm run dist
+```
+
+`pack` 生成 `dist/win-unpacked/Learn Electron.exe`，可直接运行，但分发时需要保留整个 `win-unpacked` 目录。`dist` 生成 `dist/Learn Electron Setup <版本>.exe`，使用 NSIS 默认的当前用户安装方式。
+
+配置集中在 `electron-builder.yml`，只指定应用标识、名称、输出目录、应用文件和 Windows 安装包格式。应用文件包含 `out/` 和 `LICENSE`，electron-builder 自动加入 `package.json` 及生产依赖；源码、测试和开发工具不会作为应用文件打包。沿用默认 ASAR 归档与 Electron 图标。
+
+首次打包需要下载 Electron 和打包工具，后续复用缓存。下载源可通过本机环境变量 `ELECTRON_MIRROR` 和 `ELECTRON_BUILDER_BINARIES_MIRROR` 调整。当前先支持 Windows 安装包，macOS / Linux 安装包、代码签名、自动更新和发布流程按需补充。`dist/` 已从 Git、lint 和格式检查中排除。
 
 ## 调试与检查
 
@@ -86,6 +103,7 @@ src/
       env.d.ts                   # window.electronAPI 类型声明
       styles.css                 # Tailwind CSS 入口和全局样式
 electron.vite.config.ts           # 三个进程的开发及编译配置
+electron-builder.yml              # 应用打包与 Windows 安装包配置
 tsconfig.base.json                # 共享的严格 TypeScript 配置
 tsconfig.node.json                # 主进程、preload 与工具配置的类型环境
 tsconfig.web.json                 # React 渲染进程的浏览器类型环境

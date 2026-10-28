@@ -1,0 +1,9 @@
+appId: com.example.learn-electron
+productName: Learn Electron
+directories:
+  output: dist
+files:
+  - out/**
+  - LICENSE
+win:
+  target: nsis
