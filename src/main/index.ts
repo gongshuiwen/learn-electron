@@ -9,6 +9,7 @@ import { readWindowState, saveWindowState } from './window-state'
 import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
+import { createApplicationMenu } from './menu'
 
 if (!app.requestSingleInstanceLock()) app.exit(0)
 
@@ -43,7 +44,6 @@ async function createWindow(): Promise<void> {
     minWidth: Math.min(640, bounds.width),
     minHeight: Math.min(560, bounds.height),
     show: false,
-    autoHideMenuBar: true,
     backgroundColor: windowBackground(),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.cjs'),
@@ -118,6 +118,7 @@ app
       return setTheme(source)
     })
 
+    createApplicationMenu()
     await createWindow()
     app.on('second-instance', () => {
       const window = BrowserWindow.getAllWindows()[0]
@@ -129,9 +130,7 @@ app
       window.show()
     })
 
-    void checkForAppUpdates().catch((error: unknown) => {
-      log.error('Unable to check for application updates:', error)
-    })
+    void checkForAppUpdates()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

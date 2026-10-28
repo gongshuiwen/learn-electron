@@ -1,0 +1,46 @@
+import { dirname } from 'node:path'
+import { app, dialog, Menu, shell } from 'electron'
+import log from 'electron-log/main'
+import { checkForAppUpdates } from './updater'
+
+async function openLogsDirectory(): Promise<void> {
+  try {
+    const error = await shell.openPath(dirname(log.transports.file.getFile().path))
+    if (error) throw new Error(error)
+  } catch (error) {
+    log.error('Unable to open logs directory:', error)
+    dialog.showErrorBox('无法打开日志目录', '请检查日志目录是否存在以及访问权限。')
+  }
+}
+
+export function createApplicationMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: process.platform === 'darwin' ? app.getName() : '应用',
+        submenu: [
+          { role: 'about', label: '关于' },
+          { type: 'separator' },
+          {
+            id: 'check-for-updates',
+            label: '检查更新…',
+            click: () => {
+              void checkForAppUpdates(true)
+            },
+          },
+          {
+            id: 'open-logs',
+            label: '打开日志目录',
+            click: () => {
+              void openLogsDirectory()
+            },
+          },
+          { type: 'separator' },
+          { role: 'quit', label: '退出' },
+        ],
+      },
+      { role: 'editMenu', label: '编辑' },
+      { role: 'viewMenu', label: '视图' },
+    ]),
+  )
+}

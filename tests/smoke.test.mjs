@@ -61,6 +61,47 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   assert.equal(preferences.contextIsolation, true)
   assert.equal(preferences.sandbox, true)
   assert.equal(preferences.nodeIntegration, false)
+  const menu = await desktop.evaluate(({ Menu, BrowserWindow }) => {
+    const menu = Menu.getApplicationMenu()
+    return {
+      checkUpdates: menu.getMenuItemById('check-for-updates').enabled,
+      openLogs: menu.getMenuItemById('open-logs').enabled,
+      visible: process.platform === 'darwin' || BrowserWindow.getAllWindows()[0].isMenuBarVisible(),
+    }
+  })
+  assert.deepEqual(menu, { checkUpdates: true, openLogs: true, visible: true })
+  const logsDirectory = await desktop.evaluate(async ({ Menu, shell }) => {
+    const original = shell.openPath
+    const opened = new Promise((resolve) => {
+      shell.openPath = async (path) => {
+        resolve(path)
+        return ''
+      }
+    })
+    try {
+      Menu.getApplicationMenu().getMenuItemById('open-logs').click()
+      return await opened
+    } finally {
+      shell.openPath = original
+    }
+  })
+  assert.equal(logsDirectory, join(profile, 'logs'))
+  const updateMessage = await desktop.evaluate(async ({ Menu, dialog }) => {
+    const original = dialog.showMessageBox
+    const shown = new Promise((resolve) => {
+      dialog.showMessageBox = async (options) => {
+        resolve(options.message)
+        return { response: 0, checkboxChecked: false }
+      }
+    })
+    try {
+      Menu.getApplicationMenu().getMenuItemById('check-for-updates').click()
+      return await shown
+    } finally {
+      dialog.showMessageBox = original
+    }
+  })
+  assert.match(updateMessage, /开发模式不检查更新/)
   assert.equal(await page.evaluate(() => window.Notification.permission), 'denied')
   assert.equal(await page.evaluate(() => window.Notification.requestPermission()), 'denied')
   const csp = await page
