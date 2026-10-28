@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, session } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc'
 import type { AppInfo } from '../shared/ipc'
 
@@ -48,6 +48,12 @@ function handleStartupError(error: unknown): void {
 app
   .whenReady()
   .then(async () => {
+    // The template needs no browser permissions; allow specific ones when required.
+    session.defaultSession.setPermissionCheckHandler(() => false)
+    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+      callback(false)
+    })
+
     ipcMain.handle(IPC_CHANNELS.getAppInfo, (event): AppInfo => {
       const window = BrowserWindow.fromWebContents(event.sender)
       if (

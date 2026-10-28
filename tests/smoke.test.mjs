@@ -61,6 +61,8 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   assert.equal(preferences.contextIsolation, true)
   assert.equal(preferences.sandbox, true)
   assert.equal(preferences.nodeIntegration, false)
+  assert.equal(await page.evaluate(() => window.Notification.permission), 'denied')
+  assert.equal(await page.evaluate(() => window.Notification.requestPermission()), 'denied')
   const csp = await page
     .locator('meta[http-equiv="Content-Security-Policy"]')
     .getAttribute('content')

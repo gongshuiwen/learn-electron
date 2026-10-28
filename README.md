@@ -53,6 +53,8 @@ npm run dev
 
 CI 配置覆盖 Windows、macOS 和 Ubuntu 24.04，统一从 `.nvmrc` 读取 Node.js 版本，执行依赖安装、lint、格式检查和启动检查；类型检查与编译包含在启动检查命令中。Linux 使用 runner 自带的 Xvfb 提供虚拟显示，并为 Electron 的 `chrome-sandbox` 设置所需权限，保持沙箱开启。
 
+同一 Git 引用的新检查会取消尚未完成的旧检查，避免连续推送重复占用 runner。
+
 `npm run test:example` 单独检查示例页面交互，不作为基础 CI 的依赖。替换首页时，可同步修改或删除 `tests/example.test.mjs` 和对应的 npm 命令；保留基础启动检查。
 
 React 渲染错误由错误边界显示重新加载入口；异步事件错误仍由调用方处理。主进程启动失败会输出错误并以状态码 `1` 退出。
@@ -86,6 +88,7 @@ tests/example.test.mjs            # 可随示例页面替换或删除的交互�
 - 页面和组件放在 `src/renderer/src/`，样式直接使用 Tailwind 工具类。Tailwind 使用 `@tailwindcss/vite` 插件和 CSS 入口，无需额外的 PostCSS 或 Tailwind JavaScript 配置。
 - 主进程采用 ESM；preload 编译为单个 CommonJS 文件，兼容 Electron 的沙箱模式。
 - 窗口启用 `contextIsolation` 和 `sandbox`，关闭 `nodeIntegration`。渲染进程通过 `window.electronAPI` 调用允许的接口，不直接访问 Node.js 或 `ipcRenderer`。
+- 默认拒绝浏览器权限检查和请求。需要通知、摄像头等能力时，在主进程的 `setPermissionCheckHandler` 和 `setPermissionRequestHandler` 中按具体权限与来源放行，并同步调整相关测试。
 - 新增桌面能力时，在 `src/shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。当前只读接口校验调用方的窗口主页面和 URL，返回值与主进程共享 `AppInfo` 类型。未来接收用户输入或外部数据时，再按实际数据添加运行时校验。
 - HTML 的 CSP 由 Vite 插件按环境注入：开发时允许 React Fast Refresh、样式热更新和本地 WebSocket；编译产物使用更严格的策略。
 - 提交前运行 `npm run check` 和 `npm run test:smoke`（已包含 build）。依赖使用 npm 管理，并提交 `package-lock.json`；`out/` 和类型检查缓存不入库。
