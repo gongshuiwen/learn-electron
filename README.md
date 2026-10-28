@@ -29,6 +29,8 @@ npm run dev
 
 正常关闭窗口时，将普通窗口的位置、大小和最大化状态保存到应用 `userData` 目录的 `window-state.json`，下次启动自动恢复，不记忆最小化状态。恢复时会根据当前显示器工作区调整窗口，避免窗口落在屏幕外；状态文件缺失或损坏时使用默认值。删除该文件即可重置。强制结束进程时不保证保存本次调整。
 
+首页的主题选择支持跟随系统、浅色和深色，选择后立即保存到 `userData/theme.json`。启动时先恢复主题，再创建窗口；配置缺失或损坏时跟随系统。页面通过 Tailwind 的 `dark:` 样式响应 Electron 原生配色，无需额外的主题状态库或事件桥接。保存失败时保留原主题并显示错误提示。
+
 ## 常用命令
 
 | 命令                   | 用途                                                 |
@@ -67,6 +69,7 @@ React 渲染错误由错误边界显示重新加载入口；异步事件错误�
 src/
   main/index.ts                  # Electron 主进程：窗口生命周期、IPC 处理
   main/window-state.ts           # 窗口状态保存与恢复
+  main/theme.ts                  # 主题偏好与窗口背景
   preload/index.ts               # contextBridge：只暴露明确的桌面 API
   shared/ipc.ts                  # IPC 通道、请求返回值和桥接接口类型
   renderer/
@@ -75,6 +78,7 @@ src/
       main.tsx                   # React 入口
       App.tsx                    # 示例界面
       components/RuntimeInfo.tsx # 运行环境展示
+      components/ThemeSelect.tsx # 可复用的主题选择控件
       components/ErrorBoundary.tsx # React 渲染错误提示
       env.d.ts                   # window.electronAPI 类型声明
       styles.css                 # Tailwind CSS 入口和全局样式
@@ -92,7 +96,7 @@ tests/example.test.mjs            # 可随示例页面替换或删除的交互�
 - 主进程采用 ESM；preload 编译为单个 CommonJS 文件，兼容 Electron 的沙箱模式。
 - 窗口启用 `contextIsolation` 和 `sandbox`，关闭 `nodeIntegration`。渲染进程通过 `window.electronAPI` 调用允许的接口，不直接访问 Node.js 或 `ipcRenderer`。
 - 默认拒绝浏览器权限检查和请求。需要通知、摄像头等能力时，在主进程的 `setPermissionCheckHandler` 和 `setPermissionRequestHandler` 中按具体权限与来源放行，并同步调整相关测试。
-- 新增桌面能力时，在 `src/shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。当前只读接口校验调用方的窗口主页面和 URL，返回值与主进程共享 `AppInfo` 类型。未来接收用户输入或外部数据时，再按实际数据添加运行时校验。
+- 新增桌面能力时，在 `src/shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。所有 IPC 接口校验调用方的窗口主页面和 URL；`getTheme` / `setTheme` 读取与保存主题，主进程只接受 `system`、`light`、`dark` 三种值。其他用户输入或外部数据按实际需要添加运行时校验。
 - HTML 的 CSP 由 Vite 插件按环境注入：开发时允许 React Fast Refresh、样式热更新和本地 WebSocket；编译产物使用更严格的策略。
 - 提交前运行 `npm run check` 和 `npm run test:smoke`（已包含 build）。依赖使用 npm 管理，并提交 `package-lock.json`；`out/` 和类型检查缓存不入库。
 - 锁文件使用 npm 官方 registry 的下载地址。需要镜像时，通过本机 npm registry 配置选择，无需在模板中固定镜像地址。修改示例页面后，还应运行 `npm run test:example`。

@@ -25,7 +25,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-8 text-center">
           <h1 className="text-2xl font-semibold">页面暂时无法显示</h1>
-          <p role="alert" className="text-stone-600">
+          <p role="alert" className="text-stone-600 dark:text-stone-400">
             界面发生了错误，请重新加载后再试。
           </p>
           <button

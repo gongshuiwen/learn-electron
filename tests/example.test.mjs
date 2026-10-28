@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import assert from 'node:assert/strict'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
@@ -29,10 +30,33 @@ test('Starter page counter and app information', { timeout: 30000 }, async (t) =
     timeout: 15000,
   })
   const page = await desktop.firstWindow()
+  // Let Electron's native theme drive media queries instead of Playwright's default.
+  await page.emulateMedia({ colorScheme: null })
   page.setDefaultTimeout(5000)
   await page.getByRole('heading', { name: '从这里开始，构建桌面应用。' }).waitFor()
   await page.getByRole('button', { name: '点击次数：0' }).click()
   await page.getByRole('button', { name: '点击次数：1' }).waitFor()
   await page.getByRole('button', { name: '读取应用信息' }).click()
   await page.getByText(`${manifest.name} ${manifest.version}`, { exact: true }).waitFor()
+  const theme = page.getByLabel('主题', { exact: true })
+  await theme.selectOption('dark')
+  await page.waitForFunction(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const darkBackground = await page
+    .locator('body')
+    .evaluate((element) => window.getComputedStyle(element).backgroundColor)
+  await theme.selectOption('light')
+  await page.waitForFunction(() => !window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const lightBackground = await page
+    .locator('body')
+    .evaluate((element) => window.getComputedStyle(element).backgroundColor)
+  assert.notEqual(darkBackground, lightBackground)
+
+  // An unwritable preference must leave the current theme intact and show an error.
+  const themeFile = join(profile, 'theme.json')
+  await rm(themeFile)
+  await mkdir(themeFile)
+  await theme.selectOption('dark')
+  await page.getByRole('alert').filter({ hasText: '主题设置未能保存，请重试。' }).waitFor()
+  assert.equal(await theme.inputValue(), 'light')
+  assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'light')
 })

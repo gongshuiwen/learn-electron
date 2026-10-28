@@ -1,9 +1,11 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, ipcMain, session } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, session } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc'
 import type { AppInfo } from '../shared/ipc'
 import { readWindowState, saveWindowState } from './window-state'
+import { readTheme, setTheme, windowBackground } from './theme'
 
 const rendererURL =
   !app.isPackaged && process.env.ELECTRON_RENDERER_URL
@@ -15,6 +17,17 @@ function isRendererURL(url: string): boolean {
   return url.split('#', 1)[0] === rendererURL.split('#', 1)[0]
 }
 
+function validateSender(event: IpcMainInvokeEvent): void {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (
+    !window ||
+    event.senderFrame !== window.webContents.mainFrame ||
+    !isRendererURL(event.senderFrame.url)
+  ) {
+    throw new Error('Unexpected IPC sender')
+  }
+}
+
 async function createWindow(): Promise<void> {
   const { maximized: wasMaximized, ...bounds } = readWindowState()
   const window = new BrowserWindow({
@@ -23,7 +36,7 @@ async function createWindow(): Promise<void> {
     minHeight: Math.min(560, bounds.height),
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#f5f5f4',
+    backgroundColor: windowBackground(),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -64,6 +77,12 @@ function handleStartupError(error: unknown): void {
 app
   .whenReady()
   .then(async () => {
+    nativeTheme.themeSource = readTheme()
+    nativeTheme.on('updated', () => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.setBackgroundColor(windowBackground())
+      }
+    })
     // The template needs no browser permissions; allow specific ones when required.
     session.defaultSession.setPermissionCheckHandler(() => false)
     session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
@@ -71,14 +90,7 @@ app
     })
 
     ipcMain.handle(IPC_CHANNELS.getAppInfo, (event): AppInfo => {
-      const window = BrowserWindow.fromWebContents(event.sender)
-      if (
-        !window ||
-        event.senderFrame !== window.webContents.mainFrame ||
-        !isRendererURL(event.senderFrame.url)
-      ) {
-        throw new Error('Unexpected IPC sender')
-      }
+      validateSender(event)
       return {
         name: app.getName(),
         version: app.getVersion(),
@@ -86,6 +98,15 @@ app
         chrome: process.versions.chrome,
         node: process.versions.node,
       }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.getTheme, (event) => {
+      validateSender(event)
+      return nativeTheme.themeSource
+    })
+    ipcMain.handle(IPC_CHANNELS.setTheme, (event, source: unknown) => {
+      validateSender(event)
+      return setTheme(source)
     })
 
     await createWindow()

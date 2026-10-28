@@ -225,6 +225,94 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
   }
 })
 
+test(
+  'Theme selection follows native colors, persists and validates IPC',
+  { timeout: 30000 },
+  async (t) => {
+    const profile = await mkdtemp(join(tmpdir(), 'learn-electron-theme-'))
+    const themeFile = join(profile, 'theme.json')
+    let desktop
+    t.after(async () => {
+      try {
+        await desktop?.close()
+      } finally {
+        await rm(profile, { recursive: true, force: true })
+      }
+    })
+    async function launch() {
+      desktop = await electron.launch({
+        args: [root, `--user-data-dir=${profile}`],
+        cwd: root,
+        chromiumSandbox: true,
+        env: environment,
+        timeout: 15000,
+      })
+      const page = await desktop.firstWindow()
+      await page.emulateMedia({ colorScheme: null })
+      page.setDefaultTimeout(5000)
+      await page.waitForLoadState('load')
+      return page
+    }
+    let page = await launch()
+    assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'system')
+    for (const source of ['dark', 'light', 'system']) {
+      assert.equal(
+        await page.evaluate((value) => window.electronAPI.setTheme(value), source),
+        source,
+      )
+      const native = await desktop.evaluate(({ nativeTheme }) => ({
+        source: nativeTheme.themeSource,
+        dark: nativeTheme.shouldUseDarkColors,
+      }))
+      assert.equal(native.source, source)
+      if (source !== 'system') assert.equal(native.dark, source === 'dark')
+      await page.waitForFunction(
+        (dark) => window.matchMedia('(prefers-color-scheme: dark)').matches === dark,
+        native.dark,
+      )
+      const background = await desktop.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].getBackgroundColor(),
+      )
+      assert.ok(background.toLowerCase().endsWith(native.dark ? '0c0a09' : 'f5f5f4'))
+      assert.equal(JSON.parse(await readFile(themeFile, 'utf8')), source)
+    }
+    await assert.rejects(
+      page.evaluate(() => window.electronAPI.setTheme('invalid')),
+      /Invalid theme/,
+    )
+    assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'system')
+    const trustedURL = page.url()
+    await page.evaluate(() => window.history.replaceState(null, '', '?untrusted=1'))
+    await assert.rejects(
+      page.evaluate(() => window.electronAPI.getTheme()),
+      /Unexpected IPC sender/,
+    )
+    await assert.rejects(
+      page.evaluate(() => window.electronAPI.setTheme('dark')),
+      /Unexpected IPC sender/,
+    )
+    await page.evaluate((url) => window.history.replaceState(null, '', url), trustedURL)
+
+    await page.evaluate(() => window.electronAPI.setTheme('dark'))
+    await desktop.close()
+    page = await launch()
+    assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'dark')
+    assert.equal(
+      await page.evaluate(() => window.matchMedia('(prefers-color-scheme: dark)').matches),
+      true,
+    )
+    await page.reload()
+    assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'dark')
+    await desktop.close()
+    for (const contents of ['{broken', '"invalid"']) {
+      await writeFile(themeFile, contents)
+      page = await launch()
+      assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'system')
+      await desktop.close()
+    }
+  },
+)
+
 test('A renderer load failure exits with a nonzero status', { timeout: 15000 }, async (t) => {
   const profile = await mkdtemp(join(tmpdir(), 'learn-electron-failure-'))
   t.after(() => rm(profile, { recursive: true, force: true }))
