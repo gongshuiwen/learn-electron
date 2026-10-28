@@ -63,7 +63,7 @@ CI 配置覆盖 Windows、macOS 和 Ubuntu 24.04，统一从 `.nvmrc` 读取 Nod
 
 `npm run test:example` 单独检查示例页面交互，不作为基础 CI 的依赖。替换首页时，可同步修改或删除 `tests/example.test.mjs` 和对应的 npm 命令；保留基础启动检查。
 
-React 渲染错误由错误边界显示重新加载入口；异步事件错误仍由调用方处理。主进程启动失败会输出错误并以状态码 `1` 退出。
+React 渲染错误由错误边界显示重新加载入口；异步事件错误仍由调用方处理。主进程使用 [electron-log](https://github.com/megahertz/electron-log) 将启动版本、启动错误和窗口状态保存警告输出到控制台及 `userData/logs/main.log`，沿用库默认的 1 MiB 文件轮转（旧日志为 `main.old.log`）。启动失败会记录错误堆栈并以状态码 `1` 退出。仅接入主进程，未替换全局 `console` 或启用自动异常捕获。
 
 ## 项目结构
 

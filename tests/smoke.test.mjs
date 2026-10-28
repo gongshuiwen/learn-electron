@@ -313,7 +313,7 @@ test(
   },
 )
 
-test('A renderer load failure exits with a nonzero status', { timeout: 15000 }, async (t) => {
+test('Startup failure is logged and exits with status 1', { timeout: 15000 }, async (t) => {
   const profile = await mkdtemp(join(tmpdir(), 'learn-electron-failure-'))
   t.after(() => rm(profile, { recursive: true, force: true }))
   await assert.rejects(
@@ -330,4 +330,7 @@ test('A renderer load failure exits with a nonzero status', { timeout: 15000 }, 
       return true
     },
   )
+  const log = await readFile(join(profile, 'logs', 'main.log'), 'utf8')
+  assert.ok(log.includes(`Starting ${manifest.name} ${manifest.version}`))
+  assert.match(log, /Failed to start Electron: Error:.*ERR_FILE_NOT_FOUND/)
 })

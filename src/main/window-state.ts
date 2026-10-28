@@ -1,6 +1,7 @@
 import { screen } from 'electron'
 import type { Rectangle } from 'electron'
 import Store from 'electron-store'
+import log from 'electron-log/main'
 
 interface WindowState extends Rectangle {
   maximized: boolean
@@ -53,6 +54,6 @@ export function saveWindowState(state: WindowState): void {
     // Initialization happens during readWindowState; skip if storage was unavailable.
     store?.set(state)
   } catch (error) {
-    console.warn('Unable to save window state:', error)
+    log.warn('Unable to save window state:', error)
   }
 }

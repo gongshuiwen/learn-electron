@@ -2,11 +2,15 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, ipcMain, nativeTheme, session } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
+import log from 'electron-log/main'
 import { IPC_CHANNELS } from '../shared/ipc'
 import type { AppInfo } from '../shared/ipc'
 import { readWindowState, saveWindowState } from './window-state'
 import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
+
+log.transports.file.resolvePathFn = () => join(app.getPath('userData'), 'logs', 'main.log')
+log.transports.ipc.level = false
 
 const rendererURL =
   !app.isPackaged && process.env.ELECTRON_RENDERER_URL
@@ -71,13 +75,14 @@ async function createWindow(): Promise<void> {
 }
 
 function handleStartupError(error: unknown): void {
-  console.error('Failed to start Electron:', error)
+  log.error('Failed to start Electron:', error)
   app.exit(1)
 }
 
 app
   .whenReady()
   .then(async () => {
+    log.info(`Starting ${app.getName()} ${app.getVersion()}`)
     nativeTheme.themeSource = getSettingsStore().get('theme')
     nativeTheme.on('updated', () => {
       for (const window of BrowserWindow.getAllWindows()) {
