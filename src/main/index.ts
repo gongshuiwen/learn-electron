@@ -5,7 +5,8 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc'
 import type { AppInfo } from '../shared/ipc'
 import { readWindowState, saveWindowState } from './window-state'
-import { readTheme, setTheme, windowBackground } from './theme'
+import { setTheme, windowBackground } from './theme'
+import { readSettings } from './settings'
 
 const rendererURL =
   !app.isPackaged && process.env.ELECTRON_RENDERER_URL
@@ -77,7 +78,7 @@ function handleStartupError(error: unknown): void {
 app
   .whenReady()
   .then(async () => {
-    nativeTheme.themeSource = readTheme()
+    nativeTheme.themeSource = readSettings().theme
     nativeTheme.on('updated', () => {
       for (const window of BrowserWindow.getAllWindows()) {
         window.setBackgroundColor(windowBackground())

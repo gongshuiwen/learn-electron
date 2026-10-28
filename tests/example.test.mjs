@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
@@ -52,11 +52,15 @@ test('Starter page counter and app information', { timeout: 30000 }, async (t) =
   assert.notEqual(darkBackground, lightBackground)
 
   // An unwritable preference must leave the current theme intact and show an error.
-  const themeFile = join(profile, 'theme.json')
-  await rm(themeFile)
-  await mkdir(themeFile)
+  const settingsFile = join(profile, 'settings.json')
+  await rm(settingsFile)
+  await mkdir(settingsFile)
   await theme.selectOption('dark')
   await page.getByRole('alert').filter({ hasText: '主题设置未能保存，请重试。' }).waitFor()
   assert.equal(await theme.inputValue(), 'light')
   assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'light')
+  assert.equal(
+    (await readdir(profile)).some((name) => name.startsWith('settings.') && name.endsWith('.tmp')),
+    false,
+  )
 })

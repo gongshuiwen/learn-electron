@@ -227,10 +227,10 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
 
 test(
   'Theme selection follows native colors, persists and validates IPC',
-  { timeout: 30000 },
+  { timeout: 45000 },
   async (t) => {
     const profile = await mkdtemp(join(tmpdir(), 'learn-electron-theme-'))
-    const themeFile = join(profile, 'theme.json')
+    const settingsFile = join(profile, 'settings.json')
     let desktop
     t.after(async () => {
       try {
@@ -274,7 +274,7 @@ test(
         BrowserWindow.getAllWindows()[0].getBackgroundColor(),
       )
       assert.ok(background.toLowerCase().endsWith(native.dark ? '0c0a09' : 'f5f5f4'))
-      assert.equal(JSON.parse(await readFile(themeFile, 'utf8')), source)
+      assert.deepEqual(JSON.parse(await readFile(settingsFile, 'utf8')), { theme: source })
     }
     await assert.rejects(
       page.evaluate(() => window.electronAPI.setTheme('invalid')),
@@ -304,8 +304,8 @@ test(
     await page.reload()
     assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'dark')
     await desktop.close()
-    for (const contents of ['{broken', '"invalid"']) {
-      await writeFile(themeFile, contents)
+    for (const contents of ['{broken', '{"theme":"invalid"}', '{}', 'null']) {
+      await writeFile(settingsFile, contents)
       page = await launch()
       assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'system')
       await desktop.close()
