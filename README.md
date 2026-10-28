@@ -5,7 +5,7 @@ Electron + TypeScript + React + Tailwind CSS 桌面应用基础项目，使用 e
 ## 使用此模板
 
 1. 将项目复制到自己的仓库，修改 `package.json` 的 `name`、`version`、`description` 和 `author`，然后运行 `npm install --package-lock-only` 同步锁文件。
-2. 修改 `src/renderer/index.html` 的页面标题、`electron-builder.yml` 的 `appId` 和 `productName`，以及本 README 的项目名称和说明。`appId` 应使用自己的唯一标识，发布后保持稳定。
+2. 修改 `src/renderer/index.html` 的页面标题、`electron-builder.yml` 的 `appId`、`productName` 和 `publish` 仓库，以及本 README 的项目名称和说明。`appId` 应使用自己的唯一标识，发布后保持稳定。
 3. 替换 `src/renderer/src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
 4. 按需扩展 `src/shared/ipc.ts`、主进程和 preload 的具体接口。基础测试使用 `getAppInfo` 检查 IPC，替换该接口时同步更新测试。
 5. 模板采用 [MIT 许可证](LICENSE)，使用模板代码时保留原有版权和许可声明，可为新增代码补充自己的版权信息。
@@ -62,9 +62,21 @@ npm run dist
 
 `pack` 生成 `dist/win-unpacked/Learn Electron.exe`，可直接运行，但分发时需要保留整个 `win-unpacked` 目录。`dist` 生成 `dist/Learn Electron Setup <版本>.exe`，使用 NSIS 默认的当前用户安装方式。
 
-配置集中在 `electron-builder.yml`，只指定应用标识、名称、输出目录、应用文件和 Windows 安装包格式。应用文件包含 `out/` 和 `LICENSE`，electron-builder 自动加入 `package.json` 及生产依赖；源码、测试和开发工具不会作为应用文件打包。沿用默认 ASAR 归档与 Electron 图标。
+配置集中在 `electron-builder.yml`，指定应用标识、名称、输出目录、应用文件、Windows 安装包格式和 GitHub 更新源。应用文件包含 `out/` 和 `LICENSE`，electron-builder 自动加入 `package.json` 及生产依赖；源码、测试和开发工具不会作为应用文件打包。沿用默认 ASAR 归档与 Electron 图标。
 
-首次打包需要下载 Electron 和打包工具，后续复用缓存。下载源可通过本机环境变量 `ELECTRON_MIRROR` 和 `ELECTRON_BUILDER_BINARIES_MIRROR` 调整。当前先支持 Windows 安装包，macOS / Linux 安装包、代码签名、自动更新和发布流程按需补充。`dist/` 已从 Git、lint 和格式检查中排除。
+首次打包需要下载 Electron 和打包工具，后续复用缓存。下载源可通过本机环境变量 `ELECTRON_MIRROR` 和 `ELECTRON_BUILDER_BINARIES_MIRROR` 调整。当前先支持 Windows 安装包，macOS / Linux 安装包、代码签名和自动发布流水线按需补充。`dist/` 已从 Git、lint 和格式检查中排除。
+
+## 自动更新
+
+Windows 打包版本在窗口创建后通过 `electron-updater` 检查一次 [GitHub Releases](https://github.com/gongshuiwen/learn-electron/releases)。发现新版本时用原生弹窗询问是否下载，下载完成后再询问是否重启安装；选择稍后安装不会在退出时自动安装，下次启动重新检查并复用有效下载缓存。开发模式及其他平台跳过检查。检查失败仅写入现有日志，下载失败显示提示，不影响正常使用。
+
+发布新版本：
+
+1. 更新 `package.json` 的版本号，并运行 `npm install --package-lock-only` 同步锁文件。
+2. 运行 `npm run dist`，将本次生成的安装包 `.exe`、对应 `.exe.blockmap` 和 `latest.yml` 一起上传到 GitHub Release 草稿。
+3. 确认标签为 `v<版本号>`、对应本次构建的提交，附件齐全后发布为正式 Release（不勾选预发布）。客户端无需 GitHub Token。
+
+`publish` 配置让 electron-builder 生成客户端使用的 `app-update.yml`；`--publish never` 仍阻止构建命令自动上传文件。首次使用需要手动安装包含更新功能的版本，已有旧版无法凭空获得更新能力。验证更新应安装较低版本，再发布更高版本，检查下载、重启安装以及主题和窗口设置是否保留；仅运行 `win-unpacked` 不能替代安装升级验证。
 
 ## 调试与检查
 
@@ -90,6 +102,7 @@ src/
   main/window-state.ts           # 独立窗口状态存储与屏幕边界调整
   main/theme.ts                  # 主题偏好与窗口背景
   main/settings.ts               # electron-store 实例、类型和 Schema
+  main/updater.ts                # GitHub 更新检查、下载与原生安装提示
   preload/index.ts               # contextBridge：只暴露明确的桌面 API
   shared/ipc.ts                  # IPC 通道、请求返回值和桥接接口类型
   renderer/

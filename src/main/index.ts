@@ -8,6 +8,7 @@ import type { AppInfo } from '../shared/ipc'
 import { readWindowState, saveWindowState } from './window-state'
 import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
+import { checkForAppUpdates } from './updater'
 
 log.transports.file.resolvePathFn = () => join(app.getPath('userData'), 'logs', 'main.log')
 log.transports.ipc.level = false
@@ -116,6 +117,9 @@ app
     })
 
     await createWindow()
+    void checkForAppUpdates().catch((error: unknown) => {
+      log.error('Unable to check for application updates:', error)
+    })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
