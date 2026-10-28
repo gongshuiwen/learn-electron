@@ -27,7 +27,7 @@ npm run dev
 
 首页包含 React 计数器，以及通过 preload 和 IPC 读取应用版本的示例。桌面 API 需要在 Electron 窗口内使用。
 
-正常关闭窗口时，将普通窗口的位置、大小和最大化状态保存到应用 `userData` 目录的 `window-state.json`，下次启动自动恢复，不记忆最小化状态。恢复时会根据当前显示器工作区调整窗口，避免窗口落在屏幕外；状态文件缺失或损坏时使用默认值。删除该文件即可重置。强制结束进程时不保证保存本次调整。
+窗口状态使用独立的 `electron-store` 实例，保存到应用 `userData` 目录的 `window-state.json`。正常关闭窗口时保存普通窗口的位置、大小和最大化状态，下次启动自动恢复，不记忆最小化状态。恢复时会根据当前显示器工作区调整窗口，避免窗口落在屏幕外；默认值、Schema 校验和损坏配置重置由库处理。删除该文件即可重置。强制结束进程时不保证保存本次调整。
 
 首页的主题选择支持跟随系统、浅色和深色，选择后立即保存到 `userData/settings.json`。启动时先恢复主题，再创建窗口；配置缺失或损坏时跟随系统。页面通过 Tailwind 的 `dark:` 样式响应 Electron 原生配色，无需额外的主题状态库或事件桥接。保存失败时保留原主题并显示错误提示。
 
@@ -70,7 +70,7 @@ React 渲染错误由错误边界显示重新加载入口；异步事件错误�
 ```text
 src/
   main/index.ts                  # Electron 主进程：窗口生命周期、IPC 处理
-  main/window-state.ts           # 窗口状态保存与恢复
+  main/window-state.ts           # 独立窗口状态存储与屏幕边界调整
   main/theme.ts                  # 主题偏好与窗口背景
   main/settings.ts               # electron-store 实例、类型和 Schema
   preload/index.ts               # contextBridge：只暴露明确的桌面 API

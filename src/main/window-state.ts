@@ -1,11 +1,12 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { app, screen } from 'electron'
+import { screen } from 'electron'
 import type { Rectangle } from 'electron'
+import Store from 'electron-store'
 
 interface WindowState extends Rectangle {
   maximized: boolean
 }
+
+let store: Store<WindowState> | undefined
 
 export function readWindowState(): WindowState {
   const primary = screen.getPrimaryDisplay().workArea
@@ -18,20 +19,19 @@ export function readWindowState(): WindowState {
   }
 
   try {
-    const saved = JSON.parse(
-      readFileSync(join(app.getPath('userData'), 'window-state.json'), 'utf8'),
-    ) as Partial<WindowState> | null
-    if (
-      saved &&
-      [saved.x, saved.y, saved.width, saved.height].every(Number.isSafeInteger) &&
-      typeof saved.width === 'number' &&
-      saved.width > 0 &&
-      typeof saved.height === 'number' &&
-      saved.height > 0 &&
-      typeof saved.maximized === 'boolean'
-    ) {
-      state = saved as WindowState
-    }
+    store ??= new Store<WindowState>({
+      name: 'window-state',
+      defaults: state,
+      schema: {
+        x: { type: 'integer' },
+        y: { type: 'integer' },
+        width: { type: 'integer', minimum: 1 },
+        height: { type: 'integer', minimum: 1 },
+        maximized: { type: 'boolean' },
+      },
+      clearInvalidConfig: true,
+    })
+    state = store.store
   } catch {
     // Missing or unreadable state must not prevent the app from starting.
   }
@@ -50,10 +50,8 @@ export function readWindowState(): WindowState {
 
 export function saveWindowState(state: WindowState): void {
   try {
-    const directory = app.getPath('userData')
-    mkdirSync(directory, { recursive: true })
-    // A small synchronous write on close finishes before Electron exits.
-    writeFileSync(join(directory, 'window-state.json'), JSON.stringify(state))
+    // Initialization happens during readWindowState; skip if storage was unavailable.
+    store?.set(state)
   } catch (error) {
     console.warn('Unable to save window state:', error)
   }
