@@ -19,16 +19,17 @@ npm run dev
 
 ## 常用命令
 
-| 命令                 | 用途                                                 |
-| -------------------- | ---------------------------------------------------- |
-| `npm run dev`        | 启动本地开发与热更新                                 |
-| `npm run typecheck`  | 分别检查 Node / Electron 和浏览器环境的类型          |
-| `npm run lint`       | 检查类型感知规则、React Hooks 和 Fast Refresh 规则   |
-| `npm run format`     | 使用 Prettier 格式化代码                             |
-| `npm run check`      | 执行类型、lint 和格式检查                            |
-| `npm run build`      | 检查类型并编译源码到 `out/`                          |
-| `npm run preview`    | 在 Electron 中运行已有的 `out/` 产物（先执行 build） |
-| `npm run test:smoke` | 编译并运行 Electron 启动回归检查                     |
+| 命令                   | 用途                                                 |
+| ---------------------- | ---------------------------------------------------- |
+| `npm run dev`          | 启动本地开发与热更新                                 |
+| `npm run typecheck`    | 分别检查 Node / Electron 和浏览器环境的类型          |
+| `npm run lint`         | 检查类型感知规则、React Hooks 和 Fast Refresh 规则   |
+| `npm run format`       | 使用 Prettier 格式化代码                             |
+| `npm run check`        | 执行类型、lint 和格式检查                            |
+| `npm run build`        | 检查类型并编译源码到 `out/`                          |
+| `npm run preview`      | 在 Electron 中运行已有的 `out/` 产物（先执行 build） |
+| `npm run test:smoke`   | 编译并运行 Electron 启动回归检查                     |
+| `npm run test:example` | 编译并检查示例页面的计数器与应用信息交互             |
 
 `build` 只生成本地运行所需的 JavaScript、HTML 和 CSS。本阶段未接入 Electron Forge、electron-builder、安装包制作、签名、自动更新或发布流程。
 
@@ -38,7 +39,9 @@ npm run dev
 
 开发模式为主进程和 preload 生成内联 source map，生产编译不生成 source map，并压缩渲染进程代码。普通 `npm run dev` 不开启远程调试端口。
 
-`npm run test:smoke` 使用 Node 自带测试运行器和 `playwright-core` 驱动本项目的 Electron，无需下载额外浏览器。检查启动、交互、IPC、隔离设置、页面刷新和启动失败退出码。测试使用临时用户目录，结束后关闭窗口并清理。Windows CI 执行依赖安装、lint、格式检查和启动检查；类型检查与编译包含在启动检查命令中。
+`npm run test:smoke` 使用 Node 自带测试运行器和 `playwright-core` 驱动本项目的 Electron，无需下载额外浏览器。检查页面挂载、IPC、隔离设置、hash 路由与刷新，以及启动失败退出码，不依赖示例页面文案。测试使用临时用户目录，结束后关闭窗口并清理。Windows CI 执行依赖安装、lint、格式检查和启动检查；类型检查与编译包含在启动检查命令中。
+
+`npm run test:example` 单独检查示例页面交互，不作为基础 CI 的依赖。替换首页时，可同步修改或删除 `tests/example.test.mjs` 和对应的 npm 命令；保留基础启动检查。
 
 React 渲染错误由错误边界显示重新加载入口；异步事件错误仍由调用方处理。主进程启动失败会输出错误并以状态码 `1` 退出。
 
@@ -63,6 +66,7 @@ tsconfig.base.json                # 共享的严格 TypeScript 配置
 tsconfig.node.json                # 主进程、preload 与工具配置的类型环境
 tsconfig.web.json                 # React 渲染进程的浏览器类型环境
 tests/smoke.test.mjs              # 关键启动流程回归检查
+tests/example.test.mjs            # 可随示例页面替换或删除的交互检查
 ```
 
 ## 开发约定
@@ -73,6 +77,7 @@ tests/smoke.test.mjs              # 关键启动流程回归检查
 - 新增桌面能力时，在 `src/shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。当前只读接口校验调用方的窗口主页面和 URL，返回值与主进程共享 `AppInfo` 类型。未来接收用户输入或外部数据时，再按实际数据添加运行时校验。
 - HTML 的 CSP 由 Vite 插件按环境注入：开发时允许 React Fast Refresh、样式热更新和本地 WebSocket；编译产物使用更严格的策略。
 - 提交前运行 `npm run check` 和 `npm run test:smoke`（已包含 build）。依赖使用 npm 管理，并提交 `package-lock.json`；`out/` 和类型检查缓存不入库。
+- 锁文件使用 npm 官方 registry 的下载地址。需要镜像时，通过本机 npm registry 配置选择，无需在模板中固定镜像地址。修改示例页面后，还应运行 `npm run test:example`。
 
 ## 参考文档
 

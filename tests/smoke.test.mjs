@@ -40,11 +40,8 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text())
   })
-  await page.getByRole('heading', { name: '从这里开始，构建桌面应用。' }).waitFor()
-  await page.getByRole('button', { name: '点击次数：0' }).click()
-  await page.getByRole('button', { name: '点击次数：1' }).waitFor()
-  await page.getByRole('button', { name: '读取应用信息' }).click()
-  await page.getByText(`${manifest.name} ${manifest.version}`, { exact: true }).waitFor()
+  await page.waitForLoadState('load')
+  await page.locator('#root > *').first().waitFor()
 
   const info = await page.evaluate(() => window.electronAPI.getAppInfo())
   assert.equal(info.name, manifest.name)
@@ -54,9 +51,9 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
     await page.evaluate(() => ({
       require: typeof window.require,
       process: typeof window.process,
-      api: Object.keys(window.electronAPI),
+      getAppInfo: typeof window.electronAPI.getAppInfo,
     })),
-    { require: 'undefined', process: 'undefined', api: ['getAppInfo'] },
+    { require: 'undefined', process: 'undefined', getAppInfo: 'function' },
   )
   const preferences = await desktop.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences(),
@@ -69,11 +66,26 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
     .getAttribute('content')
   assert.ok(!csp.includes('unsafe-inline'))
 
-  // The recovery button uses location.reload(), not a debugger-initiated reload.
+  await page.evaluate(() => {
+    window.location.hash = '/settings'
+  })
+  assert.equal((await page.evaluate(() => window.electronAPI.getAppInfo())).name, manifest.name)
+
+  // Only the fragment may vary; a changed query must still fail the sender check.
+  const routeURL = page.url()
+  await page.evaluate(() => window.history.replaceState(null, '', '?untrusted=1#/settings'))
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.getAppInfo()),
+    /Unexpected IPC sender/,
+  )
+  await page.evaluate((url) => window.history.replaceState(null, '', url), routeURL)
+
+  // Exercise the same reload used by the error boundary, with a hash route present.
   const reloaded = page.waitForEvent('load')
   await page.evaluate(() => window.location.reload())
   await reloaded
-  await page.getByRole('button', { name: '点击次数：0' }).waitFor()
+  assert.equal(page.url(), routeURL)
+  await page.locator('#root > *').first().waitFor()
   assert.equal((await page.evaluate(() => window.electronAPI.getAppInfo())).name, manifest.name)
   assert.deepEqual(errors, [])
 })

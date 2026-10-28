@@ -9,6 +9,11 @@ const rendererURL =
     ? new URL(process.env.ELECTRON_RENDERER_URL).href
     : pathToFileURL(join(import.meta.dirname, '../renderer/index.html')).href
 
+function isRendererURL(url: string): boolean {
+  // Hash routes belong to the same page; keep the rest of the URL exact.
+  return url.split('#', 1)[0] === rendererURL.split('#', 1)[0]
+}
+
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
     width: 1080,
@@ -29,7 +34,7 @@ async function createWindow(): Promise<void> {
   window.once('ready-to-show', () => window.show())
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => {
-    if (event.url !== rendererURL) event.preventDefault()
+    if (!isRendererURL(event.url)) event.preventDefault()
   })
 
   await window.loadURL(rendererURL)
@@ -48,7 +53,7 @@ app
       if (
         !window ||
         event.senderFrame !== window.webContents.mainFrame ||
-        event.senderFrame.url !== rendererURL
+        !isRendererURL(event.senderFrame.url)
       ) {
         throw new Error('Unexpected IPC sender')
       }
