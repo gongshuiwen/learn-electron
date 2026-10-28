@@ -27,6 +27,8 @@ npm run dev
 
 首页包含 React 计数器，以及通过 preload 和 IPC 读取应用版本的示例。桌面 API 需要在 Electron 窗口内使用。
 
+正常关闭窗口时，将普通窗口的位置、大小和最大化状态保存到应用 `userData` 目录的 `window-state.json`，下次启动自动恢复，不记忆最小化状态。恢复时会根据当前显示器工作区调整窗口，避免窗口落在屏幕外；状态文件缺失或损坏时使用默认值。删除该文件即可重置。强制结束进程时不保证保存本次调整。
+
 ## 常用命令
 
 | 命令                   | 用途                                                 |
@@ -64,6 +66,7 @@ React 渲染错误由错误边界显示重新加载入口；异步事件错误�
 ```text
 src/
   main/index.ts                  # Electron 主进程：窗口生命周期、IPC 处理
+  main/window-state.ts           # 窗口状态保存与恢复
   preload/index.ts               # contextBridge：只暴露明确的桌面 API
   shared/ipc.ts                  # IPC 通道、请求返回值和桥接接口类型
   renderer/

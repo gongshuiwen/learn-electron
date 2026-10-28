@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, ipcMain, session } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc'
 import type { AppInfo } from '../shared/ipc'
+import { readWindowState, saveWindowState } from './window-state'
 
 const rendererURL =
   !app.isPackaged && process.env.ELECTRON_RENDERER_URL
@@ -15,11 +16,11 @@ function isRendererURL(url: string): boolean {
 }
 
 async function createWindow(): Promise<void> {
+  const { maximized: wasMaximized, ...bounds } = readWindowState()
   const window = new BrowserWindow({
-    width: 1080,
-    height: 760,
-    minWidth: 640,
-    minHeight: 560,
+    ...bounds,
+    minWidth: Math.min(640, bounds.width),
+    minHeight: Math.min(560, bounds.height),
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#f5f5f4',
@@ -31,7 +32,22 @@ async function createWindow(): Promise<void> {
     },
   })
 
-  window.once('ready-to-show', () => window.show())
+  let maximized = wasMaximized
+  window.on('maximize', () => {
+    maximized = true
+  })
+  window.on('unmaximize', () => {
+    maximized = false
+  })
+  window.on('close', () => {
+    saveWindowState({ ...window.getNormalBounds(), maximized })
+  })
+  window.once('ready-to-show', () => {
+    // Reapply after native frame creation to avoid size drift at fractional DPI.
+    window.setBounds(bounds)
+    if (wasMaximized) window.maximize()
+    window.show()
+  })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => {
     if (!isRendererURL(event.url)) event.preventDefault()
