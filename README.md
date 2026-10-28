@@ -2,9 +2,19 @@
 
 Electron + TypeScript + React + Tailwind CSS 桌面应用基础项目，使用 electron-vite 管理本地开发、热更新和源码编译。
 
+## 使用此模板
+
+1. 将项目复制到自己的仓库，修改 `package.json` 的 `name`、`version`、`description` 和 `author`，然后运行 `npm install --package-lock-only` 同步锁文件。
+2. 修改 `src/renderer/index.html` 的页面标题，以及本 README 的项目名称和说明。
+3. 替换 `src/renderer/src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
+4. 按需扩展 `src/shared/ipc.ts`、主进程和 preload 的具体接口。基础测试使用 `getAppInfo` 检查 IPC，替换该接口时同步更新测试。
+5. 模板采用 [MIT 许可证](LICENSE)，使用模板代码时保留原有版权和许可声明，可为新增代码补充自己的版权信息。
+
+维护者如需启用 GitHub 的 **Use this template** 入口，先将稳定版本合入默认分支，再在仓库 Settings 中启用 **Template repository**。
+
 ## 开始开发
 
-需要 Node.js 22.13+（22.x）或 24+，推荐 Node.js 24 LTS，以及 npm。
+本地开发与 CI 统一使用 `.nvmrc` 中指定的 Node.js 24，以及随 Node.js 提供的 npm。支持 `.nvmrc` 的版本管理器可直接读取该文件；其他工具选择 Node.js 24 即可。`package.json` 的 `engines` 保留兼容范围，CI 验证 Node.js 24。
 
 ```sh
 npm ci
@@ -39,7 +49,9 @@ npm run dev
 
 开发模式为主进程和 preload 生成内联 source map，生产编译不生成 source map，并压缩渲染进程代码。普通 `npm run dev` 不开启远程调试端口。
 
-`npm run test:smoke` 使用 Node 自带测试运行器和 `playwright-core` 驱动本项目的 Electron，无需下载额外浏览器。检查页面挂载、IPC、隔离设置、hash 路由与刷新，以及启动失败退出码，不依赖示例页面文案。测试使用临时用户目录，结束后关闭窗口并清理。Windows CI 执行依赖安装、lint、格式检查和启动检查；类型检查与编译包含在启动检查命令中。
+`npm run test:smoke` 使用 Node 自带测试运行器和 `playwright-core` 驱动本项目的 Electron，无需下载额外浏览器。检查页面挂载、IPC、隔离设置、hash 路由与刷新，以及启动失败退出码，不依赖示例页面文案。测试使用临时用户目录，结束后关闭窗口并清理。
+
+CI 配置覆盖 Windows、macOS 和 Ubuntu 24.04，统一从 `.nvmrc` 读取 Node.js 版本，执行依赖安装、lint、格式检查和启动检查；类型检查与编译包含在启动检查命令中。Linux 使用 runner 自带的 Xvfb 提供虚拟显示，并为 Electron 的 `chrome-sandbox` 设置所需权限，保持沙箱开启。
 
 `npm run test:example` 单独检查示例页面交互，不作为基础 CI 的依赖。替换首页时，可同步修改或删除 `tests/example.test.mjs` 和对应的 npm 命令；保留基础启动检查。
 
