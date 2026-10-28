@@ -76,7 +76,7 @@ web_modules/
 .cache
 .parcel-cache
 
-# Next.js build output
+# Electron / Vite compiled output
 .next
 out
 
@@ -140,3 +140,4 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+electron.vite.config.*.timestamp-*
