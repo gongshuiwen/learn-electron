@@ -1,7 +1,13 @@
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipc'
 import type { AppInfo } from '../shared/ipc'
+
+const rendererURL =
+  !app.isPackaged && process.env.ELECTRON_RENDERER_URL
+    ? new URL(process.env.ELECTRON_RENDERER_URL).href
+    : pathToFileURL(join(import.meta.dirname, '../renderer/index.html')).href
 
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
@@ -22,18 +28,16 @@ async function createWindow(): Promise<void> {
 
   window.once('ready-to-show', () => window.show())
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  window.webContents.on('will-navigate', (event) => event.preventDefault())
+  window.webContents.on('will-navigate', (event) => {
+    if (event.url !== rendererURL) event.preventDefault()
+  })
 
-  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
-    await window.loadURL(process.env.ELECTRON_RENDERER_URL)
-  } else {
-    await window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
-  }
+  await window.loadURL(rendererURL)
 }
 
 function handleStartupError(error: unknown): void {
   console.error('Failed to start Electron:', error)
-  app.quit()
+  app.exit(1)
 }
 
 app
@@ -41,10 +45,13 @@ app
   .then(async () => {
     ipcMain.handle(IPC_CHANNELS.getAppInfo, (event): AppInfo => {
       const window = BrowserWindow.fromWebContents(event.sender)
-      if (!window || event.senderFrame !== window.webContents.mainFrame) {
+      if (
+        !window ||
+        event.senderFrame !== window.webContents.mainFrame ||
+        event.senderFrame.url !== rendererURL
+      ) {
         throw new Error('Unexpected IPC sender')
       }
-
       return {
         name: app.getName(),
         version: app.getVersion(),

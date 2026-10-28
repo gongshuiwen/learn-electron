@@ -26,10 +26,13 @@ function contentSecurityPolicy(): Plugin {
   }
 }
 
-export default defineConfig({
-  main: {},
+export default defineConfig(({ command }) => ({
+  main: {
+    build: { sourcemap: command === 'serve' ? 'inline' : false },
+  },
   preload: {
     build: {
+      sourcemap: command === 'serve' ? 'inline' : false,
       // Sandboxed preload scripts must use CommonJS, even when the main process is ESM.
       rolldownOptions: {
         output: { format: 'cjs', entryFileNames: 'index.cjs' },
@@ -39,5 +42,6 @@ export default defineConfig({
   renderer: {
     plugins: [react(), tailwindcss(), contentSecurityPolicy()],
     server: { host: '127.0.0.1' },
+    build: { minify: true },
   },
-})
+}))

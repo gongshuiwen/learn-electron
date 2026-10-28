@@ -13,6 +13,7 @@ export default function App() {
   async function readAppInfo(): Promise<void> {
     setPending(true)
     setError(null)
+    setAppInfo(null)
 
     try {
       setAppInfo(await window.electronAPI.getAppInfo())

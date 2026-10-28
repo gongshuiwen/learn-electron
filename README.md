@@ -19,17 +19,28 @@ npm run dev
 
 ## 常用命令
 
-| 命令                | 用途                                                 |
-| ------------------- | ---------------------------------------------------- |
-| `npm run dev`       | 启动本地开发与热更新                                 |
-| `npm run typecheck` | 分别检查 Node / Electron 和浏览器环境的类型          |
-| `npm run lint`      | 检查 TypeScript、React Hooks 和 Fast Refresh 规则    |
-| `npm run format`    | 使用 Prettier 格式化代码                             |
-| `npm run check`     | 执行类型、lint 和格式检查                            |
-| `npm run build`     | 检查类型并编译源码到 `out/`                          |
-| `npm run preview`   | 在 Electron 中运行已有的 `out/` 产物（先执行 build） |
+| 命令                 | 用途                                                 |
+| -------------------- | ---------------------------------------------------- |
+| `npm run dev`        | 启动本地开发与热更新                                 |
+| `npm run typecheck`  | 分别检查 Node / Electron 和浏览器环境的类型          |
+| `npm run lint`       | 检查类型感知规则、React Hooks 和 Fast Refresh 规则   |
+| `npm run format`     | 使用 Prettier 格式化代码                             |
+| `npm run check`      | 执行类型、lint 和格式检查                            |
+| `npm run build`      | 检查类型并编译源码到 `out/`                          |
+| `npm run preview`    | 在 Electron 中运行已有的 `out/` 产物（先执行 build） |
+| `npm run test:smoke` | 编译并运行 Electron 启动回归检查                     |
 
 `build` 只生成本地运行所需的 JavaScript、HTML 和 CSS。本阶段未接入 Electron Forge、electron-builder、安装包制作、签名、自动更新或发布流程。
+
+## 调试与检查
+
+在 VS Code 的运行和调试面板选择 **Electron: All**，按 F5 同时调试主进程、React 和 preload。配置复用 `npm run dev`，并为渲染进程调试使用本地端口 `9222`。也可以单独启动 **Electron: Main**。调试 preload 的初始执行时，在调试器连接后设置断点并重新加载窗口。
+
+开发模式为主进程和 preload 生成内联 source map，生产编译不生成 source map，并压缩渲染进程代码。普通 `npm run dev` 不开启远程调试端口。
+
+`npm run test:smoke` 使用 Node 自带测试运行器和 `playwright-core` 驱动本项目的 Electron，无需下载额外浏览器。检查启动、交互、IPC、隔离设置、页面刷新和启动失败退出码。测试使用临时用户目录，结束后关闭窗口并清理。Windows CI 执行依赖安装、lint、格式检查和启动检查；类型检查与编译包含在启动检查命令中。
+
+React 渲染错误由错误边界显示重新加载入口；异步事件错误仍由调用方处理。主进程启动失败会输出错误并以状态码 `1` 退出。
 
 ## 项目结构
 
@@ -44,12 +55,14 @@ src/
       main.tsx                   # React 入口
       App.tsx                    # 示例界面
       components/RuntimeInfo.tsx # 运行环境展示
+      components/ErrorBoundary.tsx # React 渲染错误提示
       env.d.ts                   # window.electronAPI 类型声明
       styles.css                 # Tailwind CSS 入口和全局样式
 electron.vite.config.ts           # 三个进程的开发及编译配置
 tsconfig.base.json                # 共享的严格 TypeScript 配置
 tsconfig.node.json                # 主进程、preload 与工具配置的类型环境
 tsconfig.web.json                 # React 渲染进程的浏览器类型环境
+tests/smoke.test.mjs              # 关键启动流程回归检查
 ```
 
 ## 开发约定
@@ -57,12 +70,15 @@ tsconfig.web.json                 # React 渲染进程的浏览器类型环境
 - 页面和组件放在 `src/renderer/src/`，样式直接使用 Tailwind 工具类。Tailwind 使用 `@tailwindcss/vite` 插件和 CSS 入口，无需额外的 PostCSS 或 Tailwind JavaScript 配置。
 - 主进程采用 ESM；preload 编译为单个 CommonJS 文件，兼容 Electron 的沙箱模式。
 - 窗口启用 `contextIsolation` 和 `sandbox`，关闭 `nodeIntegration`。渲染进程通过 `window.electronAPI` 调用允许的接口，不直接访问 Node.js 或 `ipcRenderer`。
-- 新增桌面能力时，在 `src/shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。主进程必须验证调用来源和传入参数。
+- 新增桌面能力时，在 `src/shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。当前只读接口校验调用方的窗口主页面和 URL，返回值与主进程共享 `AppInfo` 类型。未来接收用户输入或外部数据时，再按实际数据添加运行时校验。
 - HTML 的 CSP 由 Vite 插件按环境注入：开发时允许 React Fast Refresh、样式热更新和本地 WebSocket；编译产物使用更严格的策略。
-- 提交前运行 `npm run check` 和 `npm run build`。依赖使用 npm 管理，并提交 `package-lock.json`；`out/` 和类型检查缓存不入库。
+- 提交前运行 `npm run check` 和 `npm run test:smoke`（已包含 build）。依赖使用 npm 管理，并提交 `package-lock.json`；`out/` 和类型检查缓存不入库。
 
 ## 参考文档
 
 - [electron-vite 项目结构与开发](https://electron-vite.org/guide/dev)
 - [Tailwind CSS 的 Vite 接入](https://tailwindcss.com/docs/installation/using-vite)
 - [Electron 安全建议](https://www.electronjs.org/docs/latest/tutorial/security)
+- [electron-vite 调试](https://electron-vite.org/guide/debugging)
+- [typescript-eslint 类型感知检查](https://typescript-eslint.io/getting-started/typed-linting/)
+- [Playwright Electron API](https://playwright.dev/docs/api/class-electron)

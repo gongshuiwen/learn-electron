@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Electron: Main",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--remoteDebuggingPort", "9222"],
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "outFiles": ["${workspaceFolder}/out/main/**/*.js"],
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Electron: Renderer and Preload",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}/src/renderer",
+      "outFiles": ["${workspaceFolder}/out/preload/**/*.cjs"],
+      "timeout": 30000
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Electron: All",
+      "configurations": ["Electron: Main", "Electron: Renderer and Preload"],
+      "stopAll": true
+    }
+  ]
+}

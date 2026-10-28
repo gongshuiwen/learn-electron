@@ -7,7 +7,22 @@ import tseslint from 'typescript-eslint'
 export default defineConfig([
   globalIgnores(['out/**', 'dist/**']),
   js.configs.recommended,
-  tseslint.configs.recommended,
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
+    files: ['tests/**/*.mjs'],
+    languageOptions: {
+      globals: { process: 'readonly', window: 'readonly' },
+    },
+  },
   {
     files: ['src/renderer/src/**/*.{ts,tsx}'],
     extends: [reactHooks.configs.flat.recommended, reactRefresh.configs.vite],
