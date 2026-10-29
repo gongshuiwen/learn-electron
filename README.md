@@ -35,6 +35,8 @@ npm run dev
 
 文本文件示例支持打开、编辑和另存为 1 MiB 以内的 UTF-8 文本（`.txt`、`.md`、`.json`）。主进程通过系统对话框选择路径并异步读写，preload 只暴露打开和另存为接口，渲染进程不传入读写路径。取消操作保留当前内容，读写失败显示提示；另存为也支持空文本，覆盖确认由系统对话框处理。编辑内容仅存于当前页面，打开其他文件会替换内容，关闭窗口前需自行另存为。
 
+文件示例支持 `Ctrl/Cmd+O` 打开和 `Ctrl/Cmd+Shift+S` 另存为，仅在应用页面获得键盘焦点时生效。快捷键与按钮共用处理逻辑，读写期间和按键自动重复时不重复触发；移除示例组件时也会移除快捷键监听。
+
 界面图标使用 [Lucide React](https://lucide.dev/guide/react)，直接按需导入图标组件，通过 Tailwind 设置尺寸并继承文字颜色。带文字的装饰图标使用 `aria-hidden="true"`，保留按钮和表单标签的文字说明。
 
 UI 组件按 [shadcn/ui](https://ui.shadcn.com/docs/installation/manual) 的源码方式接入。目前只添加 `components/ui/button.tsx`，按首页需求保留 `default`、`outline` 两种样式，使用 `class-variance-authority` 管理变体、`cn` 合并 Tailwind 类名。组件源码由项目维护，沿用现有配色和 Electron 原生主题机制。

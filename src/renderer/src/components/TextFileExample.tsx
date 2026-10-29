@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
 import { FolderOpen, Save } from 'lucide-react'
 import type { TextFile } from '../../../shared/ipc'
 import { Button } from '@/components/ui/button'
@@ -40,19 +40,51 @@ export function TextFileExample() {
     }
   }
 
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      event.defaultPrevented ||
+      event.isComposing ||
+      event.altKey ||
+      event.ctrlKey === event.metaKey
+    )
+      return
+    const key = event.key.toLowerCase()
+    const open = key === 'o' && !event.shiftKey
+    const save = key === 's' && event.shiftKey
+    if (!open && !save) return
+    event.preventDefault()
+    if (event.repeat || pending !== null) return
+    void (open ? openFile() : saveFile())
+  })
+
+  useEffect(() => {
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   return (
     <section className="mt-5 rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900">
       <p className="text-xs font-medium tracking-widest text-stone-400">03 / FILE</p>
       <h2 className="mt-3 text-lg font-semibold">文本文件</h2>
       <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
-        支持 1 MiB 以内的 UTF-8 文本。打开文件会替换编辑区内容，修改后请另存为。
+        支持 1 MiB 以内的 UTF-8 文本。打开文件会替换编辑区内容，修改后请另存为。 快捷键：Ctrl/Cmd+O
+        打开，Ctrl/Cmd+Shift+S 另存为。
       </p>
       <div className="mt-4 flex flex-wrap gap-3">
-        <Button variant="outline" disabled={pending !== null} onClick={() => void openFile()}>
+        <Button
+          variant="outline"
+          disabled={pending !== null}
+          aria-keyshortcuts="Control+O Meta+O"
+          onClick={() => void openFile()}
+        >
           <FolderOpen aria-hidden="true" />
           {pending === 'open' ? '正在打开…' : '打开文本文件'}
         </Button>
-        <Button disabled={pending !== null} onClick={() => void saveFile()}>
+        <Button
+          disabled={pending !== null}
+          aria-keyshortcuts="Control+Shift+S Meta+Shift+S"
+          onClick={() => void saveFile()}
+        >
           <Save aria-hidden="true" />
           {pending === 'save' ? '正在保存…' : '另存为'}
         </Button>

@@ -192,6 +192,42 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   assert.equal(await readFile(outputFile, 'utf8'), editedText)
   assert.equal(await readFile(inputFile, 'utf8'), originalText)
 
+  // Shortcuts use the same file operations and save the latest editor content.
+  await editor.press('ControlOrMeta+o')
+  await page.getByLabel('文件内容 · 输入.txt', { exact: true }).waitFor()
+  assert.equal(await editor.inputValue(), originalText)
+  await editor.fill('快捷键保存的最新内容')
+  await editor.press('ControlOrMeta+Shift+s')
+  await page.getByRole('status').filter({ hasText: '已保存：另存为.txt' }).waitFor()
+  assert.equal(await readFile(outputFile, 'utf8'), '快捷键保存的最新内容')
+  await editor.fill(editedText)
+  await page.getByRole('button', { name: '另存为', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '已保存：另存为.txt' }).waitFor()
+
+  // Keep one dialog pending to check that repeated shortcuts cannot open another.
+  const pendingDialog = await desktop.evaluateHandle(({ dialog }) => {
+    const state = { calls: 0, cancel: null }
+    dialog.showOpenDialog = () => {
+      state.calls += 1
+      return new Promise((resolve) => {
+        state.cancel = () => resolve({ canceled: true, filePaths: [] })
+      })
+    }
+    dialog.showSaveDialog = async () => {
+      state.calls += 1
+      return { canceled: true }
+    }
+    return state
+  })
+  await page.keyboard.press('ControlOrMeta+o')
+  await page.getByRole('button', { name: '正在打开…', exact: true }).waitFor()
+  await page.keyboard.press('ControlOrMeta+o')
+  await page.keyboard.press('ControlOrMeta+Shift+s')
+  assert.equal(await pendingDialog.evaluate((state) => state.calls), 1)
+  await pendingDialog.evaluate((state) => state.cancel())
+  await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
+  await pendingDialog.dispose()
+
   // Canceling either dialog must preserve the buffer and leave files untouched.
   await editor.fill('尚未保存的内容')
   await chooseFiles(null, null)
