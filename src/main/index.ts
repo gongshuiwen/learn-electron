@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, ipcMain, nativeTheme, session } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, screen, session } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { IPC_CHANNELS } from '../shared/ipc'
@@ -66,6 +66,15 @@ async function createWindow(): Promise<void> {
   window.once('ready-to-show', () => {
     // Reapply after native frame creation to avoid size drift at fractional DPI.
     window.setBounds(bounds)
+    // Native rounding can still extend the right/bottom edge past the work area.
+    const area = screen.getDisplayMatching(bounds).workArea
+    const actual = window.getBounds()
+    const width = bounds.width - Math.max(0, actual.x + actual.width - area.x - area.width)
+    const height = bounds.height - Math.max(0, actual.y + actual.height - area.y - area.height)
+    if (width !== bounds.width || height !== bounds.height) {
+      window.setMinimumSize(Math.min(640, width), Math.min(560, height))
+      window.setBounds({ ...bounds, width, height })
+    }
     if (wasMaximized) window.maximize()
     window.show()
   })

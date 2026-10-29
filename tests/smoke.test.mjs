@@ -209,6 +209,19 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
   }
 
   await launch()
+  const edgeStates = await desktop.evaluate(({ screen }) =>
+    screen.getAllDisplays().map(({ workArea: area }) => {
+      const width = Math.min(800, area.width)
+      const height = Math.min(600, area.height)
+      return {
+        x: area.x + area.width - width,
+        y: area.y + area.height - height,
+        width,
+        height,
+        maximized: false,
+      }
+    }),
+  )
   const bounds = await desktop.evaluate(({ BrowserWindow, screen }) => {
     const win = BrowserWindow.getAllWindows()[0]
     const area = screen.getPrimaryDisplay().workArea
@@ -293,6 +306,7 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
   for (const contents of [
     '{broken',
     '{"width": "invalid"}',
+    ...edgeStates.map((state) => JSON.stringify(state)),
     JSON.stringify({
       x: 100000,
       y: -100000,
@@ -309,10 +323,28 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
     })
     assert.ok(restored.width > 0 && restored.height > 0)
     assert.ok(restored.x >= area.x && restored.y >= area.y)
-    assert.ok(restored.x + restored.width <= area.x + area.width)
-    assert.ok(restored.y + restored.height <= area.y + area.height)
+    assert.ok(
+      restored.x + restored.width <= area.x + area.width,
+      JSON.stringify({ restored, area }),
+    )
+    assert.ok(
+      restored.y + restored.height <= area.y + area.height,
+      JSON.stringify({ restored, area }),
+    )
     await desktop.close()
   }
+
+  // A corrected size must remain stable instead of shrinking on every restart.
+  const savedBounds = JSON.parse(await readFile(stateFile, 'utf8'))
+  delete savedBounds.maximized
+  await launch()
+  assert.deepEqual(
+    await desktop.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].getNormalBounds(),
+    ),
+    savedBounds,
+  )
+  await desktop.close()
 })
 
 test(
