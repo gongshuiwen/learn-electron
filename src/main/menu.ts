@@ -38,6 +38,15 @@ async function openLogsDirectory(): Promise<void> {
   }
 }
 
+async function openHelpPage(url: string): Promise<void> {
+  try {
+    await shell.openExternal(url)
+  } catch (error) {
+    log.error('Unable to open help page:', error)
+    dialog.showErrorBox('无法打开网页', '请检查默认浏览器设置后重试。')
+  }
+}
+
 export function createApplicationMenu(): void {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
@@ -66,6 +75,26 @@ export function createApplicationMenu(): void {
       },
       { role: 'editMenu', label: '编辑' },
       { role: 'viewMenu', label: '视图' },
+      {
+        role: 'help',
+        label: '帮助',
+        submenu: [
+          {
+            id: 'project-homepage',
+            label: '项目主页',
+            click: () => {
+              void openHelpPage('https://github.com/gongshuiwen/learn-electron')
+            },
+          },
+          {
+            id: 'report-issue',
+            label: '问题反馈',
+            click: () => {
+              void openHelpPage('https://github.com/gongshuiwen/learn-electron/issues')
+            },
+          },
+        ],
+      },
     ]),
   )
 }
