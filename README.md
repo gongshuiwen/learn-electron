@@ -61,21 +61,24 @@ UI 组件按 [shadcn/ui](https://ui.shadcn.com/docs/installation/manual) 的源�
 
 ## 常用命令
 
-| 命令                   | 用途                                                 |
-| ---------------------- | ---------------------------------------------------- |
-| `npm run dev`          | 启动本地开发与热更新                                 |
-| `npm run typecheck`    | 分别检查 Node / Electron 和浏览器环境的类型          |
-| `npm run lint`         | 检查类型感知规则、React Hooks 和 Fast Refresh 规则   |
-| `npm run format`       | 使用 Prettier 格式化代码                             |
-| `npm run check`        | 执行类型、lint 和格式检查                            |
-| `npm run build`        | 检查类型并编译源码到 `out/`                          |
-| `npm run pack`         | 编译并生成当前平台的可运行应用目录到 `dist/`         |
-| `npm run dist`         | 编译并生成 Windows NSIS 安装包到 `dist/`             |
-| `npm run preview`      | 在 Electron 中运行已有的 `out/` 产物（先执行 build） |
-| `npm run test:smoke`   | 编译并运行 Electron 启动回归检查                     |
-| `npm run test:example` | 编译并检查示例页面交互、文本读写和主题切换           |
+| 命令                   | 用途                                                       |
+| ---------------------- | ---------------------------------------------------------- |
+| `npm run dev`          | 启动本地开发与热更新                                       |
+| `npm run typecheck`    | 分别检查 Node / Electron 和浏览器环境的类型                |
+| `npm run lint`         | 使用 Oxlint 检查类型感知、React Hooks 和 Fast Refresh 规则 |
+| `npm run format`       | 使用 Oxfmt 格式化代码                                      |
+| `npm run format:check` | 检查代码格式                                               |
+| `npm run check`        | 执行类型、lint 和格式检查                                  |
+| `npm run build`        | 检查类型并编译源码到 `out/`                                |
+| `npm run pack`         | 编译并生成当前平台的可运行应用目录到 `dist/`               |
+| `npm run dist`         | 编译并生成 Windows NSIS 安装包到 `dist/`                   |
+| `npm run preview`      | 在 Electron 中运行已有的 `out/` 产物（先执行 build）       |
+| `npm run test:smoke`   | 编译并运行 Electron 启动回归检查                           |
+| `npm run test:example` | 编译并检查示例页面交互、文本读写和主题切换                 |
 
 `build` 只编译源码；`pack` 和 `dist` 会先执行 `build`，再由 electron-builder 打包 Electron 运行时和应用。两个打包命令均关闭自动发布。
+
+格式选项和忽略路径统一放在 `.oxfmtrc.json`，lint 规则放在 `.oxlintrc.json`。Oxlint 使用原生 React 规则和 `oxlint-tsgolint` 类型感知检查；完整类型检查由 `tsc` 执行。
 
 ## 打包应用
 
@@ -179,5 +182,6 @@ tests/example.test.mjs            # 可随示例页面替换或删除的交互�
 - [Tailwind CSS 的 Vite 接入](https://tailwindcss.com/docs/installation/using-vite)
 - [Electron 安全建议](https://www.electronjs.org/docs/latest/tutorial/security)
 - [electron-vite 调试](https://electron-vite.org/guide/debugging)
-- [typescript-eslint 类型感知检查](https://typescript-eslint.io/getting-started/typed-linting/)
+- [Oxlint 类型感知检查](https://oxc.rs/docs/guide/usage/linter/type-aware.html)
+- [Oxfmt 配置](https://oxc.rs/docs/guide/usage/formatter/config.html)
 - [Playwright Electron API](https://playwright.dev/docs/api/class-electron)

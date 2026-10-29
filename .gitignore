@@ -6,7 +6,6 @@ out/
 dist/
 .cache/
 *.tsbuildinfo
-.eslintcache
 electron.vite.config.*.timestamp-*
 
 # Logs

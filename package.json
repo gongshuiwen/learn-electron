@@ -15,9 +15,9 @@
     "predev": "install-electron",
     "dev": "electron-vite dev --watch",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "lint": "eslint . --max-warnings 0",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "lint": "oxlint . --max-warnings 0",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
     "check": "npm run typecheck && npm run lint && npm run format:check",
     "build": "npm run typecheck && electron-vite build",
     "pack": "npm run build && electron-builder --dir --publish never",
@@ -38,7 +38,6 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
@@ -47,14 +46,12 @@
     "electron": "^45.1.0",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
-    "eslint": "^10.13.0",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.7",
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.90.0",
+    "oxlint-tsgolint": "^7.0.2005",
     "playwright-core": "^1.64.1",
-    "prettier": "^3.9.10",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.0",
-    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.5"
   }
 }
