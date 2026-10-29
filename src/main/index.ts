@@ -192,8 +192,10 @@ app
       validateSender(event)
       return setTheme(source)
     })
-    ipcMain.handle(IPC_CHANNELS.openTextFile, (event, hasUnsavedChanges: unknown) =>
-      openTextFile(validateSender(event), hasUnsavedChanges),
+    ipcMain.handle(
+      IPC_CHANNELS.openTextFile,
+      (event, hasUnsavedChanges: unknown, droppedPath: unknown) =>
+        openTextFile(validateSender(event), hasUnsavedChanges, droppedPath),
     )
     ipcMain.handle(IPC_CHANNELS.saveTextFile, (event, content: unknown) =>
       saveTextFile(validateSender(event), content),

@@ -23,16 +23,23 @@ export function confirmDiscardChanges(window: BrowserWindow): boolean {
 export async function openTextFile(
   window: BrowserWindow,
   hasUnsavedChanges: unknown,
+  droppedPath?: unknown,
 ): Promise<TextFile | null> {
   if (typeof hasUnsavedChanges !== 'boolean') throw new Error('Expected an unsaved changes flag')
+  if (droppedPath !== undefined && (typeof droppedPath !== 'string' || !droppedPath)) {
+    throw new Error('Expected a dropped file path')
+  }
   if (hasUnsavedChanges && !confirmDiscardChanges(window)) return null
-  const { canceled, filePaths } = await dialog.showOpenDialog(window, {
-    title: '打开文本文件',
-    properties: ['openFile'],
-    filters,
-  })
-  const path = filePaths[0]
-  if (canceled || !path) return null
+  let path = droppedPath
+  if (path === undefined) {
+    const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+      title: '打开文本文件',
+      properties: ['openFile'],
+      filters,
+    })
+    path = filePaths[0]
+    if (canceled || !path) return null
+  }
   const info = await stat(path)
   if (!info.isFile() || info.size > MAX_TEXT_BYTES) {
     throw new Error('Choose a text file no larger than 1 MiB')

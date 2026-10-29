@@ -21,12 +21,12 @@ export function TextFileExample() {
     return () => window.removeEventListener('beforeunload', preventUnload)
   }, [hasUnsavedChanges])
 
-  async function openFile(): Promise<void> {
+  async function openFile(droppedFile?: File): Promise<void> {
     setPending('open')
     setError(null)
     setMessage(null)
     try {
-      const result = await window.electronAPI.openTextFile(hasUnsavedChanges)
+      const result = await window.electronAPI.openTextFile(hasUnsavedChanges, droppedFile)
       if (result) {
         setFile(result)
         setSavedContent(result.content)
@@ -83,8 +83,9 @@ export function TextFileExample() {
       <p className="text-xs font-medium tracking-widest text-stone-400">03 / FILE</p>
       <h2 className="mt-3 text-lg font-semibold">文本文件</h2>
       <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
-        支持 1 MiB 以内的 UTF-8 文本。打开文件会替换编辑区内容，修改后请另存为。 快捷键：Ctrl/Cmd+O
-        打开，Ctrl/Cmd+Shift+S 另存为。
+        支持 1 MiB 以内的 UTF-8
+        文本，可将单个文件拖入下方编辑区打开。打开文件会替换编辑区内容，修改后请另存为。
+        快捷键：Ctrl/Cmd+O 打开，Ctrl/Cmd+Shift+S 另存为。
       </p>
       <div className="mt-4 flex flex-wrap gap-3">
         <Button
@@ -115,6 +116,22 @@ export function TextFileExample() {
         id="text-file-content"
         value={file.content}
         disabled={pending !== null}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = pending === null ? 'copy' : 'none'
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return
+          event.preventDefault()
+          if (pending !== null) return
+          if (event.dataTransfer.files.length !== 1) {
+            setError('请一次拖入一个文本文件。')
+            setMessage(null)
+            return
+          }
+          void openFile(event.dataTransfer.files[0])
+        }}
         onChange={(event) => {
           const content = event.currentTarget.value
           setFile((current) => ({ ...current, content }))

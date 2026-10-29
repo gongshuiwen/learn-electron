@@ -186,6 +186,30 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
     )
   }
   const inputFile = join(profile, '输入.txt')
+  async function dropFiles(paths) {
+    // Obtain disk-backed File objects, so the real preload can resolve their paths.
+    await page.evaluate(() => {
+      const input = window.document.createElement('input')
+      input.type = 'file'
+      input.multiple = true
+      input.hidden = true
+      input.id = 'drop-fixture'
+      window.document.body.append(input)
+    })
+    await page.locator('#drop-fixture').setInputFiles(paths)
+    await page.evaluate(() => {
+      const input = window.document.querySelector('#drop-fixture')
+      const dataTransfer = new window.DataTransfer()
+      for (const file of input.files) dataTransfer.items.add(file)
+      window.document
+        .querySelector('#text-file-content')
+        .dispatchEvent(
+          new window.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }),
+        )
+      input.remove()
+    })
+    await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
+  }
   const outputFile = join(profile, '另存为.txt')
   const originalText = 'UTF-8 文本：你好 🌍\n第二行'
   await writeFile(inputFile, originalText, 'utf8')
@@ -312,6 +336,45 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
     page.evaluate(() => window.electronAPI.saveTextFile('文'.repeat(400000))),
     /Expected text/,
   )
+  // Dropped files share validation and unsaved-change confirmation with the picker.
+  await chooseFiles(null, outputFile)
+  await discardDialog.evaluate((state) => {
+    state.response = 0
+  })
+  await dropFiles(inputFile)
+  assert.equal(await editor.inputValue(), '失败时保留的内容')
+  assert.equal(await unsaved.count(), 1)
+  await discardDialog.evaluate((state) => {
+    state.response = 1
+  })
+  await dropFiles(inputFile)
+  await page.getByLabel('文件内容 · 输入.txt', { exact: true }).waitFor()
+  assert.equal(await editor.inputValue(), originalText)
+  assert.equal(await unsaved.count(), 0)
+  await editor.fill('拖入后编辑并保存')
+  await page.getByRole('button', { name: '另存为', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '已保存：另存为.txt' }).waitFor()
+  assert.equal(await readFile(outputFile, 'utf8'), '拖入后编辑并保存')
+  await editor.fill('失败时保留的内容')
+  await dropFiles([inputFile, outputFile])
+  await page.getByRole('alert').filter({ hasText: '请一次拖入一个文本文件' }).waitFor()
+  assert.equal(await editor.inputValue(), '失败时保留的内容')
+  for (const path of [invalidFile, largeFile]) {
+    await dropFiles(path)
+    await page.getByRole('alert').filter({ hasText: '无法打开文件' }).waitFor()
+    assert.equal(await editor.inputValue(), '失败时保留的内容')
+    assert.equal(await unsaved.count(), 1)
+  }
+  await assert.rejects(
+    page.evaluate(() =>
+      window.electronAPI.openTextFile(false, new window.File(['text'], 'fake.txt')),
+    ),
+    /Expected a dropped file path/,
+  )
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.openTextFile(false, 'arbitrary-path.txt')),
+  )
+
   const rendererURL = page.url()
   await page.evaluate(() => window.history.replaceState(null, '', '?untrusted=1'))
   await assert.rejects(
