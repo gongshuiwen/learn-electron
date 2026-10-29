@@ -2,6 +2,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
+import { fileURLToPath } from 'node:url'
 
 function contentSecurityPolicy(): Plugin {
   return {
@@ -40,6 +41,9 @@ export default defineConfig(({ command }) => ({
     },
   },
   renderer: {
+    resolve: {
+      alias: { '@': fileURLToPath(new URL('./src/renderer/src', import.meta.url)) },
+    },
     plugins: [react(), tailwindcss(), contentSecurityPolicy()],
     server: { host: '127.0.0.1' },
     build: { minify: true },

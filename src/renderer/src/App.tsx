@@ -3,6 +3,7 @@ import { Info, Plus } from 'lucide-react'
 import type { AppInfo } from '../../shared/ipc'
 import { RuntimeInfo } from './components/RuntimeInfo'
 import { ThemeSelect } from './components/ThemeSelect'
+import { Button } from '@/components/ui/button'
 
 const technologies = ['Electron', 'TypeScript', 'React', 'Tailwind CSS']
 
@@ -58,14 +59,10 @@ export default function App() {
           <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
             点击按钮，验证 React 状态更新。
           </p>
-          <button
-            type="button"
-            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-600"
-            onClick={() => setCount((current) => current + 1)}
-          >
-            <Plus className="size-4 shrink-0" aria-hidden="true" />
+          <Button className="mt-6" onClick={() => setCount((current) => current + 1)}>
+            <Plus aria-hidden="true" />
             点击次数：{count}
-          </button>
+          </Button>
         </section>
 
         <section className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-6">
@@ -74,15 +71,15 @@ export default function App() {
           <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
             通过带类型的 API 从主进程读取运行环境。
           </p>
-          <button
-            type="button"
-            className="mt-6 inline-flex items-center gap-2 rounded-lg border border-stone-300 dark:border-stone-700 px-4 py-2.5 text-sm font-medium transition-colors hover:bg-stone-50 dark:hover:bg-stone-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-600 disabled:cursor-wait disabled:opacity-50"
+          <Button
+            variant="outline"
+            className="mt-6 disabled:cursor-wait"
             onClick={() => void readAppInfo()}
             disabled={pending}
           >
-            <Info className="size-4 shrink-0" aria-hidden="true" />
+            <Info aria-hidden="true" />
             {pending ? '正在读取…' : '读取应用信息'}
-          </button>
+          </Button>
           <div role="status" className="mt-4">
             {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
             {appInfo ? <RuntimeInfo info={appInfo} /> : null}

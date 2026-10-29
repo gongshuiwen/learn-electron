@@ -29,6 +29,10 @@ npm run dev
 
 界面图标使用 [Lucide React](https://lucide.dev/guide/react)，直接按需导入图标组件，通过 Tailwind 设置尺寸并继承文字颜色。带文字的装饰图标使用 `aria-hidden="true"`，保留按钮和表单标签的文字说明。
 
+UI 组件按 [shadcn/ui](https://ui.shadcn.com/docs/installation/manual) 的源码方式接入。目前只添加 `components/ui/button.tsx`，按首页需求保留 `default`、`outline` 两种样式，使用 `class-variance-authority` 管理变体、`cn` 合并 Tailwind 类名。组件源码由项目维护，沿用现有配色和 Electron 原生主题机制。
+
+`components.json` 使用 `new-york` 风格及直接颜色类（`cssVariables: false`），`@/` 指向渲染进程的 `src/renderer/src/`。后续在项目根目录运行 `npx shadcn@latest add <组件名>` 按需添加；新增组件时检查依赖和样式差异，保留基于 `prefers-color-scheme` 的深色模式。不要直接覆盖已定制的 Button。
+
 同一用户数据目录只运行一个应用实例。重复启动会退出新进程，并显示、恢复和聚焦已有窗口；已有进程没有窗口时会重新创建。使用 Electron 原生单实例锁，开发模式同样生效，测试通过独立的临时用户目录隔离。
 
 原生菜单提供“应用、编辑、视图”：可查看关于信息、手动检查更新、打开日志目录或退出，并保留系统编辑、缩放和开发工具等常用操作。Windows / Linux 显示窗口菜单栏，macOS 使用系统菜单栏，首个菜单显示应用名称。“打开日志目录”使用当前日志文件的实际位置，失败时显示提示。
