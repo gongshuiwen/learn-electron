@@ -1,8 +1,12 @@
-import { app, dialog } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import log from 'electron-log/main'
 import electronUpdater from 'electron-updater'
 
 let updateInProgress = false
+
+function setDownloadProgress(progress: number): void {
+  for (const window of BrowserWindow.getAllWindows()) window.setProgressBar(progress)
+}
 
 export function checkForAppUpdates(manual = false): Promise<void> {
   return runUpdateCheck(manual).catch((error: unknown) => {
@@ -67,7 +71,17 @@ async function runUpdateCheck(manual: boolean): Promise<void> {
     if (response !== 0) return
 
     try {
-      await autoUpdater.downloadUpdate()
+      const onProgress = ({ percent }: { percent: number }): void => {
+        setDownloadProgress(percent / 100)
+      }
+      autoUpdater.on('download-progress', onProgress)
+      try {
+        setDownloadProgress(2)
+        await autoUpdater.downloadUpdate()
+      } finally {
+        autoUpdater.off('download-progress', onProgress)
+        setDownloadProgress(-1)
+      }
     } catch {
       // electron-updater already records download errors through its logger.
       await dialog.showMessageBox({

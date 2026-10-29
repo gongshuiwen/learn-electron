@@ -135,6 +135,83 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   assert.deepEqual(errors, [])
 })
 
+test(
+  'Update downloads clear taskbar progress and listeners before prompting',
+  { timeout: 30000, skip: process.platform !== 'win32' },
+  async (t) => {
+    const profile = await mkdtemp(join(tmpdir(), 'learn-electron-update-'))
+    let desktop
+    t.after(async () => {
+      try {
+        await desktop?.close()
+      } finally {
+        await rm(profile, { recursive: true, force: true })
+      }
+    })
+    desktop = await electron.launch({
+      args: [root, `--user-data-dir=${profile}`],
+      cwd: root,
+      chromiumSandbox: true,
+      env: environment,
+      timeout: 15000,
+    })
+    const page = await desktop.firstWindow()
+    await page.locator('#root > *').first().waitFor()
+
+    // Simulate updater events without downloading or installing a release.
+    for (const fail of [false, true, false]) {
+      const result = await desktop.evaluate(async ({ app, Menu, BrowserWindow, dialog }, fail) => {
+        const { createRequire } = process.getBuiltinModule('module')
+        const { autoUpdater } = createRequire(process.cwd() + '/package.json')('electron-updater')
+        const packaged = Object.getOwnPropertyDescriptor(app, 'isPackaged')
+        const check = autoUpdater.checkForUpdates
+        const download = autoUpdater.downloadUpdate
+        const showMessageBox = dialog.showMessageBox
+        const setProgressBar = BrowserWindow.prototype.setProgressBar
+        const progress = []
+        const before = autoUpdater.listenerCount('download-progress')
+        Object.defineProperty(app, 'isPackaged', { configurable: true, value: true })
+        BrowserWindow.prototype.setProgressBar = (value) => progress.push(value)
+        autoUpdater.checkForUpdates = async () => ({
+          isUpdateAvailable: true,
+          updateInfo: { version: '2.0.0' },
+        })
+        autoUpdater.downloadUpdate = async () => {
+          autoUpdater.emit('download-progress', { percent: 25 })
+          autoUpdater.emit('download-progress', { percent: 75 })
+          if (fail) throw new Error('Simulated download failure')
+          return []
+        }
+        try {
+          return await new Promise((resolve) => {
+            dialog.showMessageBox = async (options) => {
+              if (options.title === '应用更新') return { response: 0 }
+              resolve({
+                title: options.title,
+                progress: [...progress],
+                listenerDelta: autoUpdater.listenerCount('download-progress') - before,
+              })
+              return { response: 1 }
+            }
+            Menu.getApplicationMenu().getMenuItemById('check-for-updates').click()
+          })
+        } finally {
+          Object.defineProperty(app, 'isPackaged', packaged)
+          autoUpdater.checkForUpdates = check
+          autoUpdater.downloadUpdate = download
+          dialog.showMessageBox = showMessageBox
+          BrowserWindow.prototype.setProgressBar = setProgressBar
+        }
+      }, fail)
+      assert.deepEqual(result, {
+        title: fail ? '更新下载失败' : '更新已就绪',
+        progress: [2, 0.25, 0.75, -1],
+        listenerDelta: 0,
+      })
+    }
+  },
+)
+
 test('A crashed renderer can be reloaded or left for later', { timeout: 30000 }, async (t) => {
   const profile = await mkdtemp(join(tmpdir(), 'learn-electron-recovery-'))
   let desktop
