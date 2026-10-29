@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { SunMoon } from 'lucide-react'
 import { isThemeSource } from '../../../shared/ipc'
 import type { ThemeSource } from '../../../shared/ipc'
 
@@ -43,7 +44,10 @@ export function ThemeSelect() {
 
   return (
     <div className="mb-6 flex flex-wrap items-center justify-end gap-3 text-sm">
-      <label htmlFor="theme">主题</label>
+      <label htmlFor="theme" className="inline-flex items-center gap-2">
+        <SunMoon className="size-4 shrink-0" aria-hidden="true" />
+        主题
+      </label>
       <select
         id="theme"
         value={source}

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Info, Plus } from 'lucide-react'
 import type { AppInfo } from '../../shared/ipc'
 import { RuntimeInfo } from './components/RuntimeInfo'
 import { ThemeSelect } from './components/ThemeSelect'
@@ -59,9 +60,10 @@ export default function App() {
           </p>
           <button
             type="button"
-            className="mt-6 rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-600"
+            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-600"
             onClick={() => setCount((current) => current + 1)}
           >
+            <Plus className="size-4 shrink-0" aria-hidden="true" />
             点击次数：{count}
           </button>
         </section>
@@ -74,10 +76,11 @@ export default function App() {
           </p>
           <button
             type="button"
-            className="mt-6 rounded-lg border border-stone-300 dark:border-stone-700 px-4 py-2.5 text-sm font-medium transition-colors hover:bg-stone-50 dark:hover:bg-stone-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-600 disabled:cursor-wait disabled:opacity-50"
+            className="mt-6 inline-flex items-center gap-2 rounded-lg border border-stone-300 dark:border-stone-700 px-4 py-2.5 text-sm font-medium transition-colors hover:bg-stone-50 dark:hover:bg-stone-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-600 disabled:cursor-wait disabled:opacity-50"
             onClick={() => void readAppInfo()}
             disabled={pending}
           >
+            <Info className="size-4 shrink-0" aria-hidden="true" />
             {pending ? '正在读取…' : '读取应用信息'}
           </button>
           <div role="status" className="mt-4">
