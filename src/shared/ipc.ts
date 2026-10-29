@@ -2,6 +2,8 @@ export const IPC_CHANNELS = {
   getAppInfo: 'app:get-info',
   getTheme: 'theme:get',
   setTheme: 'theme:set',
+  openTextFile: 'file:open-text',
+  saveTextFile: 'file:save-text',
 } as const
 
 export type ThemeSource = 'system' | 'light' | 'dark'
@@ -22,4 +24,11 @@ export interface ElectronAPI {
   getAppInfo: () => Promise<AppInfo>
   getTheme: () => Promise<ThemeSource>
   setTheme: (source: ThemeSource) => Promise<ThemeSource>
+  openTextFile: () => Promise<TextFile | null>
+  saveTextFile: (content: string) => Promise<string | null>
+}
+
+export interface TextFile {
+  name: string
+  content: string
 }

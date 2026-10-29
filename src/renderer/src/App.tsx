@@ -4,6 +4,7 @@ import type { AppInfo } from '../../shared/ipc'
 import { RuntimeInfo } from './components/RuntimeInfo'
 import { ThemeSelect } from './components/ThemeSelect'
 import { Button } from '@/components/ui/button'
+import { TextFileExample } from './components/TextFileExample'
 
 const technologies = ['Electron', 'TypeScript', 'React', 'Tailwind CSS']
 
@@ -86,6 +87,8 @@ export default function App() {
           </div>
         </section>
       </div>
+
+      <TextFileExample />
 
       <footer className="mt-8 text-xs leading-6 text-stone-500 dark:text-stone-400">
         编辑 <code className="text-stone-700 dark:text-stone-300">src/renderer/src/App.tsx</code>

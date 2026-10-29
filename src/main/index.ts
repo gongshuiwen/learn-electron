@@ -10,6 +10,7 @@ import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
 import { createApplicationMenu } from './menu'
+import { openTextFile, saveTextFile } from './text-files'
 
 if (!app.requestSingleInstanceLock()) app.exit(0)
 
@@ -26,7 +27,7 @@ function isRendererURL(url: string): boolean {
   return url.split('#', 1)[0] === rendererURL.split('#', 1)[0]
 }
 
-function validateSender(event: IpcMainInvokeEvent): void {
+function validateSender(event: IpcMainInvokeEvent): BrowserWindow {
   const window = BrowserWindow.fromWebContents(event.sender)
   if (
     !window ||
@@ -35,6 +36,7 @@ function validateSender(event: IpcMainInvokeEvent): void {
   ) {
     throw new Error('Unexpected IPC sender')
   }
+  return window
 }
 
 async function createWindow(): Promise<void> {
@@ -126,6 +128,10 @@ app
       validateSender(event)
       return setTheme(source)
     })
+    ipcMain.handle(IPC_CHANNELS.openTextFile, (event) => openTextFile(validateSender(event)))
+    ipcMain.handle(IPC_CHANNELS.saveTextFile, (event, content: unknown) =>
+      saveTextFile(validateSender(event), content),
+    )
 
     createApplicationMenu()
     await createWindow()

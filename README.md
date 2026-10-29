@@ -6,7 +6,7 @@ Electron + TypeScript + React + Tailwind CSS 桌面应用基础项目，使用 e
 
 1. 将项目复制到自己的仓库，修改 `package.json` 的 `name`、`version`、`description` 和 `author`，然后运行 `npm install --package-lock-only` 同步锁文件。
 2. 修改 `src/renderer/index.html` 的页面标题、`electron-builder.yml` 的 `appId`、`productName` 和 `publish` 仓库，以及本 README 的项目名称和说明。`appId` 应使用自己的唯一标识，发布后保持稳定。
-3. 替换 `src/renderer/src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
+3. 替换 `src/renderer/src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`components/TextFileExample.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
 4. 按需扩展 `src/shared/ipc.ts`、主进程和 preload 的具体接口。基础测试使用 `getAppInfo` 检查 IPC，替换该接口时同步更新测试。
 5. 模板采用 [MIT 许可证](LICENSE)，使用模板代码时保留原有版权和许可声明，可为新增代码补充自己的版权信息。
 
@@ -26,6 +26,8 @@ npm run dev
 首次运行 `dev` 或 `preview` 时，`install-electron` 会下载 Electron 二进制文件；后续启动复用本地文件。Electron 新版本按需下载运行时，因此这里显式在启动前准备，兼容 electron-vite 的启动方式。
 
 首页包含 React 计数器，以及通过 preload 和 IPC 读取应用版本的示例。桌面 API 需要在 Electron 窗口内使用。
+
+文本文件示例支持打开、编辑和另存为 1 MiB 以内的 UTF-8 文本（`.txt`、`.md`、`.json`）。主进程通过系统对话框选择路径并异步读写，preload 只暴露打开和另存为接口，渲染进程不传入读写路径。取消操作保留当前内容，读写失败显示提示；另存为也支持空文本，覆盖确认由系统对话框处理。编辑内容仅存于当前页面，打开其他文件会替换内容，关闭窗口前需自行另存为。
 
 界面图标使用 [Lucide React](https://lucide.dev/guide/react)，直接按需导入图标组件，通过 Tailwind 设置尺寸并继承文字颜色。带文字的装饰图标使用 `aria-hidden="true"`，保留按钮和表单标签的文字说明。
 
@@ -57,7 +59,7 @@ UI 组件按 [shadcn/ui](https://ui.shadcn.com/docs/installation/manual) 的源�
 | `npm run dist`         | 编译并生成 Windows NSIS 安装包到 `dist/`             |
 | `npm run preview`      | 在 Electron 中运行已有的 `out/` 产物（先执行 build） |
 | `npm run test:smoke`   | 编译并运行 Electron 启动回归检查                     |
-| `npm run test:example` | 编译并检查示例页面的计数器与应用信息交互             |
+| `npm run test:example` | 编译并检查示例页面交互、文本读写和主题切换           |
 
 `build` 只编译源码；`pack` 和 `dist` 会先执行 `build`，再由 electron-builder 打包 Electron 运行时和应用。两个打包命令均关闭自动发布。
 
@@ -116,6 +118,7 @@ src/
   main/settings.ts               # electron-store 实例、类型和 Schema
   main/updater.ts                # GitHub 更新检查、下载与原生安装提示
   main/menu.ts                   # 原生应用菜单与打开日志目录
+  main/text-files.ts             # 原生文件对话框和 UTF-8 文本读写
   preload/index.ts               # contextBridge：只暴露明确的桌面 API
   shared/ipc.ts                  # IPC 通道、请求返回值和桥接接口类型
   renderer/
@@ -125,6 +128,7 @@ src/
       App.tsx                    # 示例界面
       components/RuntimeInfo.tsx # 运行环境展示
       components/ThemeSelect.tsx # 可复用的主题选择控件
+      components/TextFileExample.tsx # 文本打开、编辑与另存为示例
       components/ErrorBoundary.tsx # React 渲染错误提示
       env.d.ts                   # window.electronAPI 类型声明
       styles.css                 # Tailwind CSS 入口和全局样式

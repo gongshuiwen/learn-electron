@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
@@ -7,7 +7,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { _electron as electron } from 'playwright-core'
 
 // These checks belong to the starter page and can be removed along with it.
-test('Starter page counter and app information', { timeout: 30000 }, async (t) => {
+test('Starter page interactions, text files and theme', { timeout: 30000 }, async (t) => {
   const root = resolve(fileURLToPath(new URL('../', import.meta.url)))
   const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
   const profile = await mkdtemp(join(tmpdir(), 'learn-electron-example-'))
@@ -38,6 +38,91 @@ test('Starter page counter and app information', { timeout: 30000 }, async (t) =
   await page.getByRole('button', { name: '点击次数：1' }).waitFor()
   await page.getByRole('button', { name: '读取应用信息' }).click()
   await page.getByText(`${manifest.name} ${manifest.version}`, { exact: true }).waitFor()
+
+  // Stub only native file selection; exercise the real preload, IPC and file IO.
+  async function chooseFiles(openPath, savePath) {
+    await desktop.evaluate(
+      ({ dialog }, paths) => {
+        dialog.showOpenDialog = async () => ({
+          canceled: paths.openPath === null,
+          filePaths: paths.openPath === null ? [] : [paths.openPath],
+        })
+        dialog.showSaveDialog = async () => ({
+          canceled: paths.savePath === null,
+          filePath: paths.savePath ?? '',
+        })
+      },
+      { openPath, savePath },
+    )
+  }
+  const inputFile = join(profile, '输入.txt')
+  const outputFile = join(profile, '另存为.txt')
+  const originalText = 'UTF-8 文本：你好 🌍\n第二行'
+  await writeFile(inputFile, originalText, 'utf8')
+  await chooseFiles(inputFile, outputFile)
+  const editor = page.getByRole('textbox', { name: /^文件内容/ })
+  await page.getByRole('button', { name: '打开文本文件', exact: true }).click()
+  await page.getByLabel('文件内容 · 输入.txt', { exact: true }).waitFor()
+  assert.equal(await editor.inputValue(), originalText)
+  const editedText = `${originalText}\n已编辑`
+  await editor.fill(editedText)
+  await page.getByRole('button', { name: '另存为', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '已保存：另存为.txt' }).waitFor()
+  assert.equal(await readFile(outputFile, 'utf8'), editedText)
+  assert.equal(await readFile(inputFile, 'utf8'), originalText)
+
+  // Canceling either dialog must preserve the buffer and leave files untouched.
+  await editor.fill('尚未保存的内容')
+  await chooseFiles(null, null)
+  await page.getByRole('button', { name: '打开文本文件', exact: true }).click()
+  await page.getByRole('button', { name: '另存为', exact: true }).click()
+  await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
+  assert.equal(await editor.inputValue(), '尚未保存的内容')
+  assert.equal(await readFile(outputFile, 'utf8'), editedText)
+  assert.equal(await page.getByRole('alert').count(), 0)
+
+  // Empty text is a valid document, including when replacing an existing file.
+  await chooseFiles(inputFile, outputFile)
+  await editor.fill('')
+  await page.getByRole('button', { name: '另存为', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '已保存：另存为.txt' }).waitFor()
+  assert.equal(await readFile(outputFile, 'utf8'), '')
+
+  await editor.fill('失败时保留的内容')
+  const invalidFile = join(profile, 'invalid.txt')
+  const largeFile = join(profile, 'large.txt')
+  await writeFile(invalidFile, new Uint8Array([0xff]))
+  await writeFile(largeFile, 'x'.repeat(1024 * 1024 + 1))
+  for (const path of [join(profile, 'missing.txt'), invalidFile, largeFile]) {
+    await chooseFiles(path, profile)
+    await page.getByRole('button', { name: '打开文本文件', exact: true }).click()
+    await page.getByRole('alert').filter({ hasText: '无法打开文件' }).waitFor()
+    assert.equal(await editor.inputValue(), '失败时保留的内容')
+  }
+  // A directory cannot be used as the output file.
+  await page.getByRole('button', { name: '另存为', exact: true }).click()
+  await page.getByRole('alert').filter({ hasText: '无法保存文件' }).waitFor()
+  assert.equal(await editor.inputValue(), '失败时保留的内容')
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.saveTextFile(42)),
+    /Expected text/,
+  )
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.saveTextFile('文'.repeat(400000))),
+    /Expected text/,
+  )
+  const rendererURL = page.url()
+  await page.evaluate(() => window.history.replaceState(null, '', '?untrusted=1'))
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.openTextFile()),
+    /Unexpected IPC sender/,
+  )
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.saveTextFile('text')),
+    /Unexpected IPC sender/,
+  )
+  await page.evaluate((url) => window.history.replaceState(null, '', url), rendererURL)
+
   const theme = page.getByLabel('主题', { exact: true })
   await theme.selectOption('dark')
   await page.waitForFunction(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
