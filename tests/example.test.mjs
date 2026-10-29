@@ -39,6 +39,47 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   await page.getByRole('button', { name: '读取应用信息' }).click()
   await page.getByText(`${manifest.name} ${manifest.version}`, { exact: true }).waitFor()
 
+  // Capture clipboard writes inside this test app without changing the user's clipboard.
+  const clipboardSpy = await desktop.evaluateHandle(({ clipboard }) => {
+    const state = { text: '', fail: false, calls: 0 }
+    clipboard.writeText = async (text) => {
+      state.calls += 1
+      if (state.fail) throw new Error('Clipboard unavailable')
+      state.text = text
+    }
+    return state
+  })
+  const info = await page.evaluate(() => window.electronAPI.getAppInfo())
+  await page.getByText(info.os, { exact: true }).waitFor()
+  await page.getByText(info.arch, { exact: true }).waitFor()
+  const copyButton = page.getByRole('button', { name: '复制诊断信息', exact: true })
+  await copyButton.click()
+  await page.getByRole('status').filter({ hasText: '已复制诊断信息。' }).waitFor()
+  assert.equal(
+    await clipboardSpy.evaluate((state) => state.text),
+    [
+      `应用: ${manifest.name} ${manifest.version}`,
+      `Electron: ${info.electron}`,
+      `Chromium: ${info.chrome}`,
+      `Node.js: ${info.node}`,
+      `系统: ${info.os}`,
+      `架构: ${info.arch}`,
+    ].join('\n'),
+  )
+  await clipboardSpy.evaluate((state) => {
+    state.fail = true
+  })
+  await copyButton.click()
+  await page.getByRole('alert').filter({ hasText: '复制失败，请重试。' }).waitFor()
+  assert.equal(await page.getByText('已复制诊断信息。', { exact: true }).count(), 0)
+  await clipboardSpy.evaluate((state) => {
+    state.fail = false
+  })
+  await copyButton.click()
+  await page.getByRole('status').filter({ hasText: '已复制诊断信息。' }).waitFor()
+  assert.equal(await page.getByRole('alert').count(), 0)
+  assert.equal(await clipboardSpy.evaluate((state) => state.calls), 3)
+
   // Stub only native file selection; exercise the real preload, IPC and file IO.
   async function chooseFiles(openPath, savePath) {
     await desktop.evaluate(
@@ -121,6 +162,12 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
     page.evaluate(() => window.electronAPI.saveTextFile('text')),
     /Unexpected IPC sender/,
   )
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.copyDiagnostics()),
+    /Unexpected IPC sender/,
+  )
+  assert.equal(await clipboardSpy.evaluate((state) => state.calls), 3)
+  await clipboardSpy.dispose()
   await page.evaluate((url) => window.history.replaceState(null, '', url), rendererURL)
 
   const theme = page.getByLabel('主题', { exact: true })

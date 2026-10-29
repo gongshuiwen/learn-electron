@@ -81,8 +81,12 @@ export default function App() {
             <Info aria-hidden="true" />
             {pending ? '正在读取…' : '读取应用信息'}
           </Button>
-          <div role="status" className="mt-4">
-            {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+          <div className="mt-4">
+            {error ? (
+              <p role="alert" className="text-sm text-red-700 dark:text-red-400">
+                {error}
+              </p>
+            ) : null}
             {appInfo ? <RuntimeInfo info={appInfo} /> : null}
           </div>
         </section>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { release, tmpdir, type } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath, pathToFileURL, URL } from 'node:url'
@@ -47,6 +47,8 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   assert.equal(info.name, manifest.name)
   assert.equal(info.version, manifest.version)
   for (const key of ['electron', 'chrome', 'node']) assert.match(info[key], /^\d+\.\d+\.\d+/)
+  assert.equal(info.os, `${type()} ${release()}`)
+  assert.equal(info.arch, await desktop.evaluate(() => process.arch))
   assert.deepEqual(
     await page.evaluate(() => ({
       require: typeof window.require,

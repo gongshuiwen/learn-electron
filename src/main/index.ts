@@ -1,6 +1,7 @@
 import { join } from 'node:path'
+import { release, type } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, ipcMain, nativeTheme, screen, session } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, screen, session } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { IPC_CHANNELS } from '../shared/ipc'
@@ -88,6 +89,18 @@ async function createWindow(): Promise<void> {
   await window.loadURL(rendererURL)
 }
 
+function getAppInfo(): AppInfo {
+  return {
+    name: app.getName(),
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    os: `${type()} ${release()}`,
+    arch: process.arch,
+  }
+}
+
 function handleStartupError(error: unknown): void {
   log.error('Failed to start Electron:', error)
   app.exit(1)
@@ -111,13 +124,21 @@ app
 
     ipcMain.handle(IPC_CHANNELS.getAppInfo, (event): AppInfo => {
       validateSender(event)
-      return {
-        name: app.getName(),
-        version: app.getVersion(),
-        electron: process.versions.electron,
-        chrome: process.versions.chrome,
-        node: process.versions.node,
-      }
+      return getAppInfo()
+    })
+    ipcMain.handle(IPC_CHANNELS.copyDiagnostics, (event) => {
+      validateSender(event)
+      const info = getAppInfo()
+      return clipboard.writeText(
+        [
+          `应用: ${info.name} ${info.version}`,
+          `Electron: ${info.electron}`,
+          `Chromium: ${info.chrome}`,
+          `Node.js: ${info.node}`,
+          `系统: ${info.os}`,
+          `架构: ${info.arch}`,
+        ].join('\n'),
+      )
     })
 
     ipcMain.handle(IPC_CHANNELS.getTheme, (event) => {

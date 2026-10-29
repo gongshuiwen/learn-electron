@@ -1,5 +1,6 @@
 export const IPC_CHANNELS = {
   getAppInfo: 'app:get-info',
+  copyDiagnostics: 'app:copy-diagnostics',
   getTheme: 'theme:get',
   setTheme: 'theme:set',
   openTextFile: 'file:open-text',
@@ -18,10 +19,13 @@ export interface AppInfo {
   electron: string
   chrome: string
   node: string
+  os: string
+  arch: string
 }
 
 export interface ElectronAPI {
   getAppInfo: () => Promise<AppInfo>
+  copyDiagnostics: () => Promise<void>
   getTheme: () => Promise<ThemeSource>
   setTheme: (source: ThemeSource) => Promise<ThemeSource>
   openTextFile: () => Promise<TextFile | null>
