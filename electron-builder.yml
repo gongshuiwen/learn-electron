@@ -6,6 +6,7 @@ files:
   - out/**
   - LICENSE
 win:
+  icon: build/icon.ico
   target: nsis
 publish:
   provider: github

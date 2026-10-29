@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">共线双圆 · 网格优化版</title>
+  <desc id="desc">512 像素画布，16 像素主网格、8 像素辅助网格；斜线倾角 63.435 度，图形整体上移 8 像素，两组严格平行，双圆圆心与内侧连接线共线。浅色圆角底板、黑色线条。</desc>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="#f5f5f4" stroke="#dedbd7" stroke-width="4"/>
+  <g fill="none" stroke="#000000">
+    <path d="M 308.521981 161.043961 L 424 392 L 344 392 L 216 136 L 88 392 L 168 392 L 203.478019 321.043961" stroke-width="32" stroke-linecap="butt" stroke-linejoin="round"/>
+    <circle cx="296" cy="136" r="28" stroke-width="24"/>
+    <circle cx="216" cy="296" r="28" stroke-width="24"/>
+  </g>
+</svg>

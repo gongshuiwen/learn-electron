@@ -22,6 +22,8 @@ import { checkForAppUpdates } from './updater'
 import { createApplicationMenu, registerContextMenu } from './menu'
 import { confirmDiscardChanges, openTextFile, saveTextFile } from './text-files'
 import { showNotification } from './notifications'
+import icon from '../../build/icon.png?asset'
+import windowsIcon from '../../build/icon.ico?asset'
 
 if (!app.requestSingleInstanceLock()) app.exit(0)
 
@@ -57,6 +59,7 @@ async function createWindow(): Promise<void> {
     minWidth: Math.min(640, bounds.width),
     minHeight: Math.min(560, bounds.height),
     show: false,
+    icon: process.platform === 'win32' ? windowsIcon : icon,
     backgroundColor: windowBackground(),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.cjs'),

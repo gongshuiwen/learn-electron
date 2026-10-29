@@ -1,0 +1,87 @@
+{
+  "canvas": [512, 512],
+  "grid": {
+    "major": 16,
+    "minor": 8
+  },
+  "points": {
+    "A": [308.5219806739988, 161.04396134799765],
+    "B": [424, 392],
+    "C": [344, 392],
+    "D": [216, 136],
+    "E": [88, 392],
+    "F": [168, 392],
+    "G": [203.47801932600117, 321.04396134799765],
+    "O": [296, 136],
+    "I": [216, 296]
+  },
+  "segments": [
+    {
+      "id": "L1",
+      "from": "A",
+      "to": "B",
+      "length": 258.2167011199731,
+      "inclination_deg": 63.43494882292201
+    },
+    {
+      "id": "L2",
+      "from": "B",
+      "to": "C",
+      "length": 80,
+      "inclination_deg": 0
+    },
+    {
+      "id": "L3",
+      "from": "C",
+      "to": "D",
+      "length": 286.2167011199731,
+      "inclination_deg": 63.43494882292201
+    },
+    {
+      "id": "L4",
+      "from": "D",
+      "to": "E",
+      "length": 286.2167011199731,
+      "inclination_deg": 63.43494882292201
+    },
+    {
+      "id": "L5",
+      "from": "E",
+      "to": "F",
+      "length": 80,
+      "inclination_deg": 0
+    },
+    {
+      "id": "L6",
+      "from": "F",
+      "to": "G",
+      "length": 79.3312629199899,
+      "inclination_deg": 63.43494882292201
+    }
+  ],
+  "body_stroke": 32,
+  "ring_stroke": 24,
+  "ring_radius": 28,
+  "ring_outer_diameter": 80,
+  "ring_inner_diameter": 32,
+  "center_distance": 178.88543819998318,
+  "apex_angle_deg": 53.13010235415598,
+  "plate": {
+    "x": 16,
+    "y": 16,
+    "width": 480,
+    "height": 480,
+    "radius": 96,
+    "border": 4
+  },
+  "small_icon_adjustment": "16/24 px: ring centerline radius 32 source units; all axes and centers unchanged",
+  "optical_offset_y": -8,
+  "mark_bounds": {
+    "left": 72,
+    "top": 96,
+    "right": 440,
+    "bottom": 408,
+    "center": [256, 252]
+  },
+  "annotation_note": "A/G are computed ring connection points retained in data only; primary diagram emphasizes circle centers O/I."
+}
