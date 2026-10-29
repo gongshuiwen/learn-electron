@@ -1,7 +1,16 @@
 import { join } from 'node:path'
 import { release, type } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, clipboard, ipcMain, nativeTheme, screen, session } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  screen,
+  session,
+} from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { IPC_CHANNELS } from '../shared/ipc'
@@ -87,6 +96,26 @@ async function createWindow(): Promise<void> {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => {
     if (!isRendererURL(event.url)) event.preventDefault()
+  })
+  window.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit' || window.isDestroyed()) return
+    log.error('Renderer process exited:', details)
+    void dialog
+      .showMessageBox(window, {
+        type: 'error',
+        title: '页面异常退出',
+        message: '页面遇到问题，是否重新加载？',
+        detail: '未保存的内容可能已丢失。重新加载后可继续使用应用。',
+        buttons: ['重新加载', '暂不处理'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0 && !window.isDestroyed()) window.webContents.reload()
+      })
+      .catch((error: unknown) => {
+        log.error('Unable to recover renderer:', error)
+      })
   })
 
   await window.loadURL(rendererURL)

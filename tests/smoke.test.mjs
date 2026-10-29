@@ -135,6 +135,93 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   assert.deepEqual(errors, [])
 })
 
+test('A crashed renderer can be reloaded or left for later', { timeout: 30000 }, async (t) => {
+  const profile = await mkdtemp(join(tmpdir(), 'learn-electron-recovery-'))
+  let desktop
+  t.after(async () => {
+    try {
+      await desktop?.close()
+    } finally {
+      await rm(profile, { recursive: true, force: true })
+    }
+  })
+  desktop = await electron.launch({
+    args: [root, `--user-data-dir=${profile}`],
+    cwd: root,
+    chromiumSandbox: true,
+    env: environment,
+    timeout: 15000,
+  })
+  const page = await desktop.firstWindow()
+  page.setDefaultTimeout(5000)
+  await page.locator('#root > *').first().waitFor()
+
+  // Only replace the dialog response; crash and reload the actual renderer.
+  const recovery = await desktop.evaluate(async ({ BrowserWindow, dialog }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    const contents = window.webContents
+    const original = dialog.showMessageBox
+    const prompts = []
+    dialog.showMessageBox = async (parent, options) => {
+      prompts.push({ correctParent: parent === window, ...options })
+      return { response: 0, checkboxChecked: false }
+    }
+    try {
+      contents.emit('render-process-gone', {}, { reason: 'clean-exit', exitCode: 0 })
+      const cleanExitPrompts = prompts.length
+      await new Promise((resolve) => {
+        contents.once('did-finish-load', resolve)
+        contents.forcefullyCrashRenderer()
+      })
+      return { cleanExitPrompts, prompts, crashed: contents.isCrashed() }
+    } finally {
+      dialog.showMessageBox = original
+    }
+  })
+  assert.equal(recovery.cleanExitPrompts, 0)
+  assert.equal(recovery.prompts.length, 1)
+  assert.equal(recovery.prompts[0].correctParent, true)
+  assert.deepEqual(recovery.prompts[0].buttons, ['重新加载', '暂不处理'])
+  assert.equal(recovery.prompts[0].cancelId, 1)
+  assert.match(recovery.prompts[0].detail, /未保存/)
+  assert.equal(recovery.crashed, false)
+  // Playwright keeps the old target marked as crashed after Electron reloads it.
+  const restored = await desktop.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].webContents.executeJavaScript(`
+      window.electronAPI.getAppInfo().then(info => ({
+        name: info.name,
+        rendered: Boolean(document.querySelector('#root > *'))
+      }))
+    `),
+  )
+  assert.deepEqual(restored, { name: manifest.name, rendered: true })
+
+  await desktop.evaluate(async ({ BrowserWindow, dialog }) => {
+    const original = dialog.showMessageBox
+    try {
+      await new Promise((resolve) => {
+        dialog.showMessageBox = async () => {
+          resolve()
+          return { response: 1, checkboxChecked: false }
+        }
+        BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer()
+      })
+    } finally {
+      dialog.showMessageBox = original
+    }
+  })
+  assert.equal(
+    await desktop.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].webContents.isCrashed(),
+    ),
+    true,
+  )
+  const log = await readFile(join(profile, 'logs', 'main.log'), 'utf8')
+  assert.match(log, /Renderer process exited:/)
+  assert.match(log, /reason:/)
+  assert.match(log, /exitCode:/)
+})
+
 test('Native context menus follow the editing context', { timeout: 30000 }, async (t) => {
   const profile = await mkdtemp(join(tmpdir(), 'learn-electron-context-menu-'))
   let desktop
