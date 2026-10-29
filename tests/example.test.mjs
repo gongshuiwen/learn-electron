@@ -80,6 +80,86 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   assert.equal(await page.getByRole('alert').count(), 0)
   assert.equal(await clipboardSpy.evaluate((state) => state.calls), 3)
 
+  // Exercise native notification events without posting real desktop notifications.
+  const notificationSpy = await desktop.evaluateHandle(({ Notification }) => {
+    const state = { supported: false, mode: 'show', calls: 0, closed: 0, notification: null }
+    Notification.isSupported = () => state.supported
+    Notification.prototype.close = function () {
+      state.closed += 1
+    }
+    Notification.prototype.show = function () {
+      state.calls += 1
+      state.notification = this
+      if (state.mode === 'throw') throw new Error('Native notification error')
+      if (state.mode === 'show') this.emit('show', {})
+      if (state.mode === 'failed') {
+        void Promise.resolve().then(() => this.emit('failed', {}, 'Notifications disabled'))
+      }
+    }
+    return state
+  })
+  const notifyButton = page.getByRole('button', { name: '发送系统通知', exact: true })
+  await notifyButton.click()
+  await page.getByRole('status').filter({ hasText: '当前系统不支持通知。' }).waitFor()
+  assert.equal(await notificationSpy.evaluate((state) => state.calls), 0)
+  await notificationSpy.evaluate((state) => {
+    state.supported = true
+  })
+  await notifyButton.click()
+  await page.getByRole('status').filter({ hasText: '通知已交给系统' }).waitFor()
+  assert.deepEqual(
+    await notificationSpy.evaluate((state) => ({
+      title: state.notification.title,
+      body: state.notification.body,
+    })),
+    { title: '系统通知', body: '这是一条示例通知，点击可返回应用。' },
+  )
+  await desktop.evaluate(async ({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (process.platform === 'linux') {
+      win.hide()
+    } else {
+      await new Promise((resolve) => {
+        win.once('minimize', resolve)
+        win.minimize()
+      })
+    }
+  })
+  await notificationSpy.evaluate((state) => state.notification.emit('click', {}))
+  assert.deepEqual(
+    await desktop.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      return { visible: win.isVisible(), minimized: win.isMinimized() }
+    }),
+    { visible: true, minimized: false },
+  )
+  for (const mode of ['failed', 'throw', 'timeout']) {
+    await notificationSpy.evaluate((state, value) => {
+      state.mode = value
+    }, mode)
+    await notifyButton.click()
+    await page
+      .getByRole('alert')
+      .filter({ hasText: '未能发送或确认通知' })
+      .waitFor({ timeout: 8000 })
+    assert.equal(await page.getByRole('status').filter({ hasText: '通知已交给系统' }).count(), 0)
+  }
+  await notificationSpy.evaluate((state) => {
+    state.mode = 'show'
+  })
+  await notifyButton.click()
+  await page.getByRole('status').filter({ hasText: '通知已交给系统' }).waitFor()
+  assert.equal(await page.getByRole('alert').count(), 0)
+  assert.equal(await notificationSpy.evaluate((state) => state.closed), 4)
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.showNotification(' ', 'body')),
+    /Expected a notification title and body/,
+  )
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.showNotification('title', 42)),
+    /Expected a notification title and body/,
+  )
+
   // Stub only native file selection; exercise the real preload, IPC and file IO.
   async function chooseFiles(openPath, savePath) {
     await desktop.evaluate(
@@ -168,6 +248,12 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   )
   assert.equal(await clipboardSpy.evaluate((state) => state.calls), 3)
   await clipboardSpy.dispose()
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.showNotification('title', 'body')),
+    /Unexpected IPC sender/,
+  )
+  assert.equal(await notificationSpy.evaluate((state) => state.calls), 5)
+  await notificationSpy.dispose()
   await page.evaluate((url) => window.history.replaceState(null, '', url), rendererURL)
 
   const theme = page.getByLabel('主题', { exact: true })

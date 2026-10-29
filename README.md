@@ -5,8 +5,8 @@ Electron + TypeScript + React + Tailwind CSS 桌面应用基础项目，使用 e
 ## 使用此模板
 
 1. 将项目复制到自己的仓库，修改 `package.json` 的 `name`、`version`、`description` 和 `author`，然后运行 `npm install --package-lock-only` 同步锁文件。
-2. 修改 `src/renderer/index.html` 的页面标题、`electron-builder.yml` 的 `appId`、`productName` 和 `publish` 仓库，以及本 README 的项目名称和说明。`appId` 应使用自己的唯一标识，发布后保持稳定。
-3. 替换 `src/renderer/src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`components/TextFileExample.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
+2. 修改 `src/renderer/index.html` 的页面标题、`electron-builder.yml` 的 `appId`、`productName` 和 `publish` 仓库，以及本 README 的项目名称和说明。`appId` 应使用自己的唯一标识，发布后保持稳定，并同步修改 `src/main/index.ts` 中用于 Windows 通知的应用标识。
+3. 替换 `src/renderer/src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`components/TextFileExample.tsx`、`components/NotificationExample.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
 4. 按需扩展 `src/shared/ipc.ts`、主进程和 preload 的具体接口。基础测试使用 `getAppInfo` 检查 IPC，替换该接口时同步更新测试。
 5. 模板采用 [MIT 许可证](LICENSE)，使用模板代码时保留原有版权和许可声明，可为新增代码补充自己的版权信息。
 
@@ -28,6 +28,10 @@ npm run dev
 首页包含 React 计数器，以及通过 preload 和 IPC 读取应用版本的示例。桌面 API 需要在 Electron 窗口内使用。
 
 读取应用信息后，可点击“复制诊断信息”，将应用名称和版本、Electron / Chromium / Node.js 版本、系统类型及版本、应用运行架构复制为纯文本。展示和复制共用主进程的信息采集函数，剪贴板写入成功后显示反馈，失败可重试。
+
+“发送系统通知”通过主进程的 Electron `Notification` 发送标题和正文，点击通知恢复并显示仍存在的原窗口。示例只保留最近一条通知，重复发送会替换上一条；不持久化通知，也不在应用退出后处理通知点击。不支持通知时显示提示，发送失败或 5 秒内未收到系统回执时可重试。系统回执不保证横幅可见，勿扰模式和系统通知设置仍会影响展示。
+
+根据 [Electron 通知文档](https://www.electronjs.org/docs/latest/tutorial/notifications)，Windows 应使用安装后的应用验证通知，开发模式可能需要将 Electron 可执行文件固定到开始菜单；运行时应用标识须与安装包的 `appId` 一致。macOS 通知需要应用签名，Linux 需要支持通知的桌面服务。现有渲染进程浏览器权限仍默认拒绝，通知通过受校验的 IPC 调用主进程。
 
 文本文件示例支持打开、编辑和另存为 1 MiB 以内的 UTF-8 文本（`.txt`、`.md`、`.json`）。主进程通过系统对话框选择路径并异步读写，preload 只暴露打开和另存为接口，渲染进程不传入读写路径。取消操作保留当前内容，读写失败显示提示；另存为也支持空文本，覆盖确认由系统对话框处理。编辑内容仅存于当前页面，打开其他文件会替换内容，关闭窗口前需自行另存为。
 
@@ -121,6 +125,7 @@ src/
   main/updater.ts                # GitHub 更新检查、下载与原生安装提示
   main/menu.ts                   # 原生应用菜单与打开日志目录
   main/text-files.ts             # 原生文件对话框和 UTF-8 文本读写
+  main/notifications.ts          # 系统通知及点击恢复窗口
   preload/index.ts               # contextBridge：只暴露明确的桌面 API
   shared/ipc.ts                  # IPC 通道、请求返回值和桥接接口类型
   renderer/
@@ -131,6 +136,7 @@ src/
       components/RuntimeInfo.tsx # 运行环境展示
       components/ThemeSelect.tsx # 可复用的主题选择控件
       components/TextFileExample.tsx # 文本打开、编辑与另存为示例
+      components/NotificationExample.tsx # 系统通知示例
       components/ErrorBoundary.tsx # React 渲染错误提示
       env.d.ts                   # window.electronAPI 类型声明
       styles.css                 # Tailwind CSS 入口和全局样式

@@ -12,6 +12,7 @@ import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
 import { createApplicationMenu } from './menu'
 import { openTextFile, saveTextFile } from './text-files'
+import { showNotification } from './notifications'
 
 if (!app.requestSingleInstanceLock()) app.exit(0)
 
@@ -110,6 +111,10 @@ app
   .whenReady()
   .then(async () => {
     log.info(`Starting ${app.getName()} ${app.getVersion()}`)
+    if (process.platform === 'win32') {
+      // Keep the packaged ID in sync with electron-builder.yml.
+      app.setAppUserModelId(app.isPackaged ? 'com.example.learn-electron' : process.execPath)
+    }
     nativeTheme.themeSource = getSettingsStore().get('theme')
     nativeTheme.on('updated', () => {
       for (const window of BrowserWindow.getAllWindows()) {
@@ -140,6 +145,9 @@ app
         ].join('\n'),
       )
     })
+    ipcMain.handle(IPC_CHANNELS.showNotification, (event, title: unknown, body: unknown) =>
+      showNotification(validateSender(event), title, body),
+    )
 
     ipcMain.handle(IPC_CHANNELS.getTheme, (event) => {
       validateSender(event)
