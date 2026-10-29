@@ -10,7 +10,8 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.showNotification, title, body) as Promise<NotificationResult>,
   getTheme: () => ipcRenderer.invoke(IPC_CHANNELS.getTheme) as Promise<ThemeSource>,
   setTheme: (source) => ipcRenderer.invoke(IPC_CHANNELS.setTheme, source) as Promise<ThemeSource>,
-  openTextFile: () => ipcRenderer.invoke(IPC_CHANNELS.openTextFile) as Promise<TextFile | null>,
+  openTextFile: (hasUnsavedChanges) =>
+    ipcRenderer.invoke(IPC_CHANNELS.openTextFile, hasUnsavedChanges) as Promise<TextFile | null>,
   saveTextFile: (content) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveTextFile, content) as Promise<string | null>,
 }

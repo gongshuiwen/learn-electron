@@ -160,7 +160,16 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
     /Expected a notification title and body/,
   )
 
-  // Stub only native file selection; exercise the real preload, IPC and file IO.
+  const discardDialog = await desktop.evaluateHandle(({ dialog }) => {
+    const state = { response: 1, calls: 0, options: null }
+    dialog.showMessageBoxSync = (_window, options) => {
+      state.calls += 1
+      state.options = options
+      return state.response
+    }
+    return state
+  })
+  // Stub native dialogs; exercise the real preload, IPC and file IO.
   async function chooseFiles(openPath, savePath) {
     await desktop.evaluate(
       ({ dialog }, paths) => {
@@ -182,15 +191,22 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   await writeFile(inputFile, originalText, 'utf8')
   await chooseFiles(inputFile, outputFile)
   const editor = page.getByRole('textbox', { name: /^文件内容/ })
+  const unsaved = page.getByText('未保存', { exact: true })
   await page.getByRole('button', { name: '打开文本文件', exact: true }).click()
   await page.getByLabel('文件内容 · 输入.txt', { exact: true }).waitFor()
   assert.equal(await editor.inputValue(), originalText)
+  assert.equal(await unsaved.count(), 0)
   const editedText = `${originalText}\n已编辑`
+  await editor.fill(editedText)
+  await unsaved.waitFor()
+  await editor.fill(originalText)
+  await unsaved.waitFor({ state: 'hidden' })
   await editor.fill(editedText)
   await page.getByRole('button', { name: '另存为', exact: true }).click()
   await page.getByRole('status').filter({ hasText: '已保存：另存为.txt' }).waitFor()
   assert.equal(await readFile(outputFile, 'utf8'), editedText)
   assert.equal(await readFile(inputFile, 'utf8'), originalText)
+  assert.equal(await unsaved.count(), 0)
 
   // Shortcuts use the same file operations and save the latest editor content.
   await editor.press('ControlOrMeta+o')
@@ -230,11 +246,27 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
 
   // Canceling either dialog must preserve the buffer and leave files untouched.
   await editor.fill('尚未保存的内容')
+  await discardDialog.evaluate((state) => {
+    state.response = 0
+  })
+  await chooseFiles(inputFile, outputFile)
+  await page.getByRole('button', { name: '打开文本文件', exact: true }).click()
+  await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
+  assert.equal(await editor.inputValue(), '尚未保存的内容')
+  assert.equal(await unsaved.count(), 1)
+  const confirmation = await discardDialog.evaluate((state) => state.options)
+  assert.deepEqual(confirmation.buttons, ['取消', '放弃修改'])
+  assert.equal(confirmation.defaultId, 0)
+  assert.equal(confirmation.cancelId, 0)
+  await discardDialog.evaluate((state) => {
+    state.response = 1
+  })
   await chooseFiles(null, null)
   await page.getByRole('button', { name: '打开文本文件', exact: true }).click()
   await page.getByRole('button', { name: '另存为', exact: true }).click()
   await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
   assert.equal(await editor.inputValue(), '尚未保存的内容')
+  assert.equal(await unsaved.count(), 1)
   assert.equal(await readFile(outputFile, 'utf8'), editedText)
   assert.equal(await page.getByRole('alert').count(), 0)
 
@@ -244,6 +276,13 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   await page.getByRole('button', { name: '另存为', exact: true }).click()
   await page.getByRole('status').filter({ hasText: '已保存：另存为.txt' }).waitFor()
   assert.equal(await readFile(outputFile, 'utf8'), '')
+  assert.equal(await unsaved.count(), 0)
+
+  await editor.fill('允许替换的修改')
+  await page.getByRole('button', { name: '打开文本文件', exact: true }).click()
+  await page.getByLabel('文件内容 · 输入.txt', { exact: true }).waitFor()
+  assert.equal(await editor.inputValue(), originalText)
+  assert.equal(await unsaved.count(), 0)
 
   await editor.fill('失败时保留的内容')
   const invalidFile = join(profile, 'invalid.txt')
@@ -260,6 +299,11 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   await page.getByRole('button', { name: '另存为', exact: true }).click()
   await page.getByRole('alert').filter({ hasText: '无法保存文件' }).waitFor()
   assert.equal(await editor.inputValue(), '失败时保留的内容')
+  assert.equal(await unsaved.count(), 1)
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.openTextFile('invalid')),
+    /Expected an unsaved changes flag/,
+  )
   await assert.rejects(
     page.evaluate(() => window.electronAPI.saveTextFile(42)),
     /Expected text/,
@@ -271,7 +315,7 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   const rendererURL = page.url()
   await page.evaluate(() => window.history.replaceState(null, '', '?untrusted=1'))
   await assert.rejects(
-    page.evaluate(() => window.electronAPI.openTextFile()),
+    page.evaluate(() => window.electronAPI.openTextFile(false)),
     /Unexpected IPC sender/,
   )
   await assert.rejects(
@@ -313,4 +357,41 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   await page.getByRole('alert').filter({ hasText: '主题设置未能保存，请重试。' }).waitFor()
   assert.equal(await theme.inputValue(), 'light')
   assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'light')
+
+  // Native close/reload attempts must respect the renderer's unsaved content.
+  await discardDialog.evaluate((state) => {
+    state.response = 0
+  })
+  const previousPrompts = await discardDialog.evaluate((state) => state.calls)
+  for (const action of ['close', 'reload']) {
+    await desktop.evaluate(async ({ BrowserWindow }, action) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      await new Promise((resolve) => {
+        window.webContents.once('will-prevent-unload', () => resolve())
+        if (action === 'close') window.close()
+        else window.webContents.reload()
+      })
+    }, action)
+    assert.equal(await editor.inputValue(), '失败时保留的内容')
+    assert.equal(await unsaved.count(), 1)
+  }
+  assert.equal(await discardDialog.evaluate((state) => state.calls), previousPrompts + 2)
+  await discardDialog.evaluate((state) => {
+    state.response = 1
+  })
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await desktop.evaluate(async ({ BrowserWindow }) => {
+      const contents = BrowserWindow.getAllWindows()[0].webContents
+      await new Promise((resolve) => {
+        contents.once('did-finish-load', () => resolve())
+        contents.reload()
+      })
+    })
+    await editor.waitFor()
+    assert.equal(await editor.inputValue(), '')
+    assert.equal(await unsaved.count(), 0)
+  }
+  // Only the first reload discards changes; the clean page needs no confirmation.
+  assert.equal(await discardDialog.evaluate((state) => state.calls), previousPrompts + 3)
+  await discardDialog.dispose()
 })

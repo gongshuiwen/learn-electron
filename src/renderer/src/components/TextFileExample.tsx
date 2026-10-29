@@ -5,17 +5,32 @@ import { Button } from '@/components/ui/button'
 
 export function TextFileExample() {
   const [file, setFile] = useState<TextFile>({ name: '未命名.txt', content: '' })
+  const [savedContent, setSavedContent] = useState('')
   const [pending, setPending] = useState<'open' | 'save' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const hasUnsavedChanges = file.content !== savedContent
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const preventUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', preventUnload)
+    return () => window.removeEventListener('beforeunload', preventUnload)
+  }, [hasUnsavedChanges])
 
   async function openFile(): Promise<void> {
     setPending('open')
     setError(null)
     setMessage(null)
     try {
-      const result = await window.electronAPI.openTextFile()
-      if (result) setFile(result)
+      const result = await window.electronAPI.openTextFile(hasUnsavedChanges)
+      if (result) {
+        setFile(result)
+        setSavedContent(result.content)
+      }
     } catch {
       setError('无法打开文件，请检查读取权限，并选择不超过 1 MiB 的 UTF-8 文本文件。')
     } finally {
@@ -31,6 +46,7 @@ export function TextFileExample() {
       const name = await window.electronAPI.saveTextFile(file.content)
       if (name) {
         setFile((current) => ({ ...current, name }))
+        setSavedContent(file.content)
         setMessage(`已保存：${name}`)
       }
     } catch {
@@ -91,6 +107,9 @@ export function TextFileExample() {
       </div>
       <label htmlFor="text-file-content" className="mt-4 block break-all text-sm font-medium">
         文件内容 · {file.name}
+        {hasUnsavedChanges ? (
+          <span className="ml-2 text-amber-700 dark:text-amber-400">未保存</span>
+        ) : null}
       </label>
       <textarea
         id="text-file-content"

@@ -31,7 +31,7 @@ export interface ElectronAPI {
   showNotification: (title: string, body: string) => Promise<NotificationResult>
   getTheme: () => Promise<ThemeSource>
   setTheme: (source: ThemeSource) => Promise<ThemeSource>
-  openTextFile: () => Promise<TextFile | null>
+  openTextFile: (hasUnsavedChanges: boolean) => Promise<TextFile | null>
   saveTextFile: (content: string) => Promise<string | null>
 }
 

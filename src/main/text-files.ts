@@ -7,7 +7,25 @@ import type { TextFile } from '../shared/ipc'
 const MAX_TEXT_BYTES = 1024 * 1024
 const filters = [{ name: '文本文件', extensions: ['txt', 'md', 'json'] }]
 
-export async function openTextFile(window: BrowserWindow): Promise<TextFile | null> {
+export function confirmDiscardChanges(window: BrowserWindow): boolean {
+  return (
+    dialog.showMessageBoxSync(window, {
+      type: 'warning',
+      title: '未保存修改',
+      message: '有未保存的修改，是否放弃？',
+      buttons: ['取消', '放弃修改'],
+      defaultId: 0,
+      cancelId: 0,
+    }) === 1
+  )
+}
+
+export async function openTextFile(
+  window: BrowserWindow,
+  hasUnsavedChanges: unknown,
+): Promise<TextFile | null> {
+  if (typeof hasUnsavedChanges !== 'boolean') throw new Error('Expected an unsaved changes flag')
+  if (hasUnsavedChanges && !confirmDiscardChanges(window)) return null
   const { canceled, filePaths } = await dialog.showOpenDialog(window, {
     title: '打开文本文件',
     properties: ['openFile'],

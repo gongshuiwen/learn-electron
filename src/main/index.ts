@@ -20,7 +20,7 @@ import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
 import { createApplicationMenu, registerContextMenu } from './menu'
-import { openTextFile, saveTextFile } from './text-files'
+import { confirmDiscardChanges, openTextFile, saveTextFile } from './text-files'
 import { showNotification } from './notifications'
 
 if (!app.requestSingleInstanceLock()) app.exit(0)
@@ -96,6 +96,10 @@ async function createWindow(): Promise<void> {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => {
     if (!isRendererURL(event.url)) event.preventDefault()
+  })
+  window.webContents.on('will-prevent-unload', (event) => {
+    // Preventing this event allows the pending close or reload to continue.
+    if (confirmDiscardChanges(window)) event.preventDefault()
   })
   window.webContents.on('render-process-gone', (_event, details) => {
     if (details.reason === 'clean-exit' || window.isDestroyed()) return
@@ -188,7 +192,9 @@ app
       validateSender(event)
       return setTheme(source)
     })
-    ipcMain.handle(IPC_CHANNELS.openTextFile, (event) => openTextFile(validateSender(event)))
+    ipcMain.handle(IPC_CHANNELS.openTextFile, (event, hasUnsavedChanges: unknown) =>
+      openTextFile(validateSender(event), hasUnsavedChanges),
+    )
     ipcMain.handle(IPC_CHANNELS.saveTextFile, (event, content: unknown) =>
       saveTextFile(validateSender(event), content),
     )
