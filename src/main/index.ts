@@ -10,7 +10,7 @@ import { readWindowState, saveWindowState } from './window-state'
 import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
-import { createApplicationMenu } from './menu'
+import { createApplicationMenu, registerContextMenu } from './menu'
 import { openTextFile, saveTextFile } from './text-files'
 import { showNotification } from './notifications'
 
@@ -56,6 +56,8 @@ async function createWindow(): Promise<void> {
       sandbox: true,
     },
   })
+
+  registerContextMenu(window)
 
   let maximized = wasMaximized
   window.on('maximize', () => {

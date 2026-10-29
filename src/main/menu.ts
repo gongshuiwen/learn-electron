@@ -1,7 +1,32 @@
 import { dirname } from 'node:path'
 import { app, dialog, Menu, shell } from 'electron'
+import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
 import log from 'electron-log/main'
 import { checkForAppUpdates } from './updater'
+
+export function registerContextMenu(window: BrowserWindow): void {
+  window.webContents.on('context-menu', (_event, params) => {
+    if (!params.frame || (!params.isEditable && !params.selectionText)) return
+    const { editFlags } = params
+    const items: MenuItemConstructorOptions[] = params.isEditable
+      ? [
+          { role: 'undo', label: '撤销', enabled: editFlags.canUndo },
+          { role: 'redo', label: '重做', enabled: editFlags.canRedo },
+          { type: 'separator' },
+          { role: 'cut', label: '剪切', enabled: editFlags.canCut },
+          { role: 'copy', label: '复制', enabled: editFlags.canCopy },
+          { role: 'paste', label: '粘贴', enabled: editFlags.canPaste },
+          { type: 'separator' },
+          { role: 'selectAll', label: '全选', enabled: editFlags.canSelectAll },
+        ]
+      : [{ role: 'copy', label: '复制', enabled: editFlags.canCopy }]
+    Menu.buildFromTemplate(items).popup({
+      window,
+      frame: params.frame,
+      sourceType: params.menuSourceType,
+    })
+  })
+}
 
 async function openLogsDirectory(): Promise<void> {
   try {

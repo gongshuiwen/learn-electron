@@ -135,6 +135,86 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   assert.deepEqual(errors, [])
 })
 
+test('Native context menus follow the editing context', { timeout: 30000 }, async (t) => {
+  const profile = await mkdtemp(join(tmpdir(), 'learn-electron-context-menu-'))
+  let desktop
+  t.after(async () => {
+    try {
+      await desktop?.close()
+    } finally {
+      await rm(profile, { recursive: true, force: true })
+    }
+  })
+  desktop = await electron.launch({
+    args: [root, `--user-data-dir=${profile}`],
+    cwd: root,
+    chromiumSandbox: true,
+    env: environment,
+    timeout: 15000,
+  })
+  const page = await desktop.firstWindow()
+  page.setDefaultTimeout(5000)
+  await page.waitForLoadState('load')
+  await page.evaluate(() => {
+    const fixture = window.document.createElement('section')
+    fixture.innerHTML =
+      '<textarea id="context-editor"></textarea><p id="context-text">Selected text</p><div id="context-blank"><br></div>'
+    window.document.body.prepend(fixture)
+  })
+  // Capture native menus without showing an OS popup or changing the clipboard.
+  const spy = await desktop.evaluateHandle(({ Menu, BrowserWindow }) => {
+    const state = { popup: null }
+    Menu.prototype.popup = function (options) {
+      const window = BrowserWindow.getAllWindows()[0]
+      state.popup = {
+        items: this.items.map(({ role, type, enabled }) => ({ role, type, enabled })),
+        correctTarget: options.window === window && options.frame === window.webContents.mainFrame,
+      }
+    }
+    return state
+  })
+  async function rightClick(selector) {
+    const [popup] = await Promise.all([
+      desktop.evaluate(({ BrowserWindow }, state) => {
+        state.popup = null
+        return new Promise((resolve) => {
+          BrowserWindow.getAllWindows()[0].webContents.once('context-menu', () => {
+            resolve(state.popup)
+          })
+        })
+      }, spy),
+      page.locator(selector).click({ button: 'right', position: { x: 10, y: 10 } }),
+    ])
+    return popup
+  }
+
+  const empty = await rightClick('#context-editor')
+  assert.equal(empty.correctTarget, true)
+  assert.deepEqual(
+    empty.items.filter(({ type }) => type !== 'separator').map(({ role }) => role.toLowerCase()),
+    ['undo', 'redo', 'cut', 'copy', 'paste', 'selectall'],
+  )
+  assert.equal(empty.items.find(({ role }) => role === 'copy').enabled, false)
+  assert.equal(empty.items.find(({ role }) => role === 'cut').enabled, false)
+
+  await page.locator('#context-editor').fill('Editable text')
+  await page.locator('#context-editor').press('ControlOrMeta+A')
+  const selected = await rightClick('#context-editor')
+  assert.equal(selected.items.find(({ role }) => role === 'copy').enabled, true)
+  assert.equal(selected.items.find(({ role }) => role === 'cut').enabled, true)
+
+  await page.evaluate(() => {
+    window.getSelection().selectAllChildren(window.document.querySelector('#context-text'))
+  })
+  const text = await rightClick('#context-text')
+  assert.equal(text.correctTarget, true)
+  assert.deepEqual(text.items, [{ role: 'copy', type: 'normal', enabled: true }])
+
+  await page.evaluate(() => window.getSelection().removeAllRanges())
+  assert.equal(await rightClick('#context-blank'), null)
+  await spy.dispose()
+})
+
 test('A second instance restores the existing window and exits', { timeout: 30000 }, async (t) => {
   const profile = await mkdtemp(join(tmpdir(), 'learn-electron-single-instance-'))
   let desktop
