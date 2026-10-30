@@ -212,6 +212,118 @@ test(
   },
 )
 
+test(
+  'Windows tray restores, hides and quits through the normal close flow',
+  { timeout: 30000, skip: process.platform !== 'win32' },
+  async (t) => {
+    const profile = await mkdtemp(join(tmpdir(), 'learn-electron-tray-'))
+    let desktop
+    t.after(async () => {
+      try {
+        await desktop?.close()
+      } finally {
+        await rm(profile, { recursive: true, force: true })
+      }
+    })
+    // Capture the real native tray and menu before the application creates them.
+    const bootstrap = join(profile, 'tray-test.cjs')
+    const destroyedFile = join(profile, 'tray-destroyed.txt')
+    await writeFile(
+      bootstrap,
+      `
+      const { app, Tray } = require('electron')
+      const { writeFileSync } = require('node:fs')
+      const original = Tray.prototype.setContextMenu
+      Tray.prototype.setContextMenu = function(menu) {
+        process.trayProbe = { tray: this, menu }
+        return original.call(this, menu)
+      }
+      app.on('will-quit', () => {
+        writeFileSync(${JSON.stringify(destroyedFile)}, String(process.trayProbe.tray.isDestroyed()))
+      })
+      import(${JSON.stringify(pathToFileURL(join(root, 'out/main/index.js')).href)})
+    `,
+    )
+    desktop = await electron.launch({
+      args: [bootstrap, `--user-data-dir=${profile}`],
+      cwd: root,
+      chromiumSandbox: true,
+      env: environment,
+      timeout: 15000,
+    })
+    const page = await desktop.firstWindow()
+    page.setDefaultTimeout(5000)
+    await page.locator('#root > *').first().waitFor()
+    assert.deepEqual(
+      await desktop.evaluate(() =>
+        process.trayProbe.menu.items
+          .filter((item) => item.type !== 'separator')
+          .map((item) => item.label),
+      ),
+      ['显示窗口', '隐藏窗口', '退出应用'],
+    )
+    await page.evaluate(() => {
+      window.trayTestValue = 'preserved'
+    })
+    await desktop.evaluate(() => process.trayProbe.menu.items[1].click())
+    assert.equal(
+      await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()),
+      false,
+    )
+    await desktop.evaluate(() => process.trayProbe.tray.emit('click', {}, {}, {}))
+    assert.equal(
+      await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()),
+      true,
+    )
+    assert.equal(await page.evaluate(() => window.trayTestValue), 'preserved')
+    await desktop.evaluate(async ({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      await new Promise((resolve) => {
+        window.once('minimize', resolve)
+        window.minimize()
+      })
+      await new Promise((resolve) => {
+        window.once('restore', resolve)
+        process.trayProbe.menu.items[0].click()
+      })
+    })
+    assert.equal(
+      await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()),
+      false,
+    )
+
+    // A hidden window must become visible for the unsaved-change prompt.
+    await page.evaluate(() => {
+      window.addEventListener('beforeunload', (event) => {
+        event.preventDefault()
+        event.returnValue = ''
+      })
+    })
+    await desktop.evaluate(async ({ BrowserWindow, dialog }) => {
+      dialog.showMessageBoxSync = () => 0
+      const window = BrowserWindow.getAllWindows()[0]
+      process.trayProbe.menu.items[1].click()
+      await new Promise((resolve) => {
+        window.webContents.once('will-prevent-unload', () => resolve())
+        process.trayProbe.menu.items[3].click()
+      })
+    })
+    assert.equal(
+      await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()),
+      true,
+    )
+    assert.equal(await desktop.evaluate(() => process.trayProbe.tray.isDestroyed()), false)
+    const exited = desktop.waitForEvent('close')
+    await desktop.evaluate(({ dialog }) => {
+      dialog.showMessageBoxSync = () => 1
+      process.trayProbe.menu.items[3].click()
+    })
+    await exited
+    desktop = undefined
+    assert.equal(await readFile(destroyedFile, 'utf8'), 'true')
+  },
+)
+
 test('A crashed renderer can be reloaded or left for later', { timeout: 30000 }, async (t) => {
   const profile = await mkdtemp(join(tmpdir(), 'learn-electron-recovery-'))
   let desktop

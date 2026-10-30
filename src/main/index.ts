@@ -19,7 +19,7 @@ import { readWindowState, saveWindowState } from './window-state'
 import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
-import { createApplicationMenu, registerContextMenu } from './menu'
+import { createApplicationMenu, createTray, registerContextMenu } from './menu'
 import { confirmDiscardChanges, openTextFile, saveTextFile } from './text-files'
 import { showNotification } from './notifications'
 import icon from '../../build/icon.png?asset'
@@ -70,6 +70,7 @@ async function createWindow(): Promise<void> {
   })
 
   registerContextMenu(window)
+  createTray(window, windowsIcon)
 
   let maximized = wasMaximized
   window.on('maximize', () => {

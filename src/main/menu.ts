@@ -1,8 +1,36 @@
 import { dirname } from 'node:path'
-import { app, dialog, Menu, shell } from 'electron'
+import { app, dialog, Menu, shell, Tray } from 'electron'
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
 import log from 'electron-log/main'
 import { checkForAppUpdates } from './updater'
+
+export function createTray(window: BrowserWindow, icon: string): void {
+  if (process.platform !== 'win32') return
+  const tray = new Tray(icon)
+  const showWindow = (): void => {
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  }
+  tray.setToolTip(app.getName())
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '显示窗口', click: showWindow },
+      { label: '隐藏窗口', click: () => window.hide() },
+      { type: 'separator' },
+      {
+        label: '退出应用',
+        click: () => {
+          showWindow()
+          app.quit()
+        },
+      },
+    ]),
+  )
+  tray.on('click', showWindow)
+  // This listener retains the tray until its window is actually closed.
+  window.once('closed', () => tray.destroy())
+}
 
 export function registerContextMenu(window: BrowserWindow): void {
   window.webContents.on('context-menu', (_event, params) => {
