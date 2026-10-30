@@ -18,6 +18,7 @@ const api: ElectronAPI = {
     ) as Promise<TextFile | null>,
   saveTextFile: (content) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveTextFile, content) as Promise<string | null>,
+  showSavedFile: () => ipcRenderer.invoke(IPC_CHANNELS.showSavedFile) as Promise<void>,
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)

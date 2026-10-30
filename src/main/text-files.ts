@@ -1,11 +1,12 @@
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { dialog } from 'electron'
+import { dialog, shell } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { TextFile } from '../shared/ipc'
 
 const MAX_TEXT_BYTES = 1024 * 1024
 const filters = [{ name: '文本文件', extensions: ['txt', 'md', 'json'] }]
+const savedFiles = new WeakMap<BrowserWindow, string>()
 
 export function confirmDiscardChanges(window: BrowserWindow): boolean {
   return (
@@ -63,5 +64,13 @@ export async function saveTextFile(
   })
   if (canceled || !filePath) return null
   await writeFile(filePath, content, 'utf8')
+  savedFiles.set(window, filePath)
   return basename(filePath)
+}
+
+export async function showSavedFile(window: BrowserWindow): Promise<void> {
+  const path = savedFiles.get(window)
+  if (!path) throw new Error('No saved file for this window')
+  if (!(await stat(path)).isFile()) throw new Error('Saved file is no longer a regular file')
+  shell.showItemInFolder(path)
 }

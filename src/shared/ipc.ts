@@ -6,6 +6,7 @@ export const IPC_CHANNELS = {
   setTheme: 'theme:set',
   openTextFile: 'file:open-text',
   saveTextFile: 'file:save-text',
+  showSavedFile: 'file:show-saved',
 } as const
 
 export type ThemeSource = 'system' | 'light' | 'dark'
@@ -33,6 +34,7 @@ export interface ElectronAPI {
   setTheme: (source: ThemeSource) => Promise<ThemeSource>
   openTextFile: (hasUnsavedChanges: boolean, droppedFile?: File) => Promise<TextFile | null>
   saveTextFile: (content: string) => Promise<string | null>
+  showSavedFile: () => Promise<void>
 }
 
 export interface TextFile {

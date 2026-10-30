@@ -1,12 +1,13 @@
 import { useEffect, useEffectEvent, useState } from 'react'
-import { FolderOpen, Save } from 'lucide-react'
+import { FolderOpen, FolderSearch, Save } from 'lucide-react'
 import type { TextFile } from '../../../shared/ipc'
 import { Button } from '@/components/ui/button'
 
 export function TextFileExample() {
   const [file, setFile] = useState<TextFile>({ name: '未命名.txt', content: '' })
   const [savedContent, setSavedContent] = useState('')
-  const [pending, setPending] = useState<'open' | 'save' | null>(null)
+  const [pending, setPending] = useState<'open' | 'save' | 'show' | null>(null)
+  const [hasSavedFile, setHasSavedFile] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const hasUnsavedChanges = file.content !== savedContent
@@ -47,10 +48,23 @@ export function TextFileExample() {
       if (name) {
         setFile((current) => ({ ...current, name }))
         setSavedContent(file.content)
+        setHasSavedFile(true)
         setMessage(`已保存：${name}`)
       }
     } catch {
       setError('无法保存文件，请检查写入权限，并确保内容不超过 1 MiB。')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function showFile(): Promise<void> {
+    setPending('show')
+    setError(null)
+    try {
+      await window.electronAPI.showSavedFile()
+    } catch {
+      setError('无法显示文件，请确认最近保存的文件仍然存在且可访问。')
     } finally {
       setPending(null)
     }
@@ -105,6 +119,17 @@ export function TextFileExample() {
           <Save aria-hidden="true" />
           {pending === 'save' ? '正在保存…' : '另存为'}
         </Button>
+        {hasSavedFile ? (
+          <Button
+            variant="outline"
+            disabled={pending !== null}
+            title="在文件管理器中显示本窗口最近保存的文件"
+            onClick={() => void showFile()}
+          >
+            <FolderSearch aria-hidden="true" />
+            显示文件
+          </Button>
+        ) : null}
       </div>
       <label htmlFor="text-file-content" className="mt-4 block break-all text-sm font-medium">
         文件内容 · {file.name}

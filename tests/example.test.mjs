@@ -216,6 +216,20 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   await chooseFiles(inputFile, outputFile)
   const editor = page.getByRole('textbox', { name: /^文件内容/ })
   const unsaved = page.getByText('未保存', { exact: true })
+  const showFileButton = page.getByRole('button', { name: '显示文件', exact: true })
+  assert.equal(await showFileButton.count(), 0)
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.showSavedFile()),
+    /No saved file for this window/,
+  )
+  // Capture file-manager requests without opening real Explorer windows.
+  const shownFiles = await desktop.evaluateHandle(({ shell }) => {
+    const paths = []
+    shell.showItemInFolder = (path) => {
+      paths.push(path)
+    }
+    return paths
+  })
   await page.getByRole('button', { name: '打开文本文件', exact: true }).click()
   await page.getByLabel('文件内容 · 输入.txt', { exact: true }).waitFor()
   assert.equal(await editor.inputValue(), originalText)
@@ -231,6 +245,9 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   assert.equal(await readFile(outputFile, 'utf8'), editedText)
   assert.equal(await readFile(inputFile, 'utf8'), originalText)
   assert.equal(await unsaved.count(), 0)
+  await showFileButton.click()
+  await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
+  assert.deepEqual(await shownFiles.jsonValue(), [outputFile])
 
   // Shortcuts use the same file operations and save the latest editor content.
   await editor.press('ControlOrMeta+o')
@@ -293,6 +310,9 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   assert.equal(await unsaved.count(), 1)
   assert.equal(await readFile(outputFile, 'utf8'), editedText)
   assert.equal(await page.getByRole('alert').count(), 0)
+  await showFileButton.click()
+  await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
+  assert.equal(await shownFiles.evaluate((paths) => paths.at(-1)), outputFile)
 
   // Empty text is a valid document, including when replacing an existing file.
   await chooseFiles(inputFile, outputFile)
@@ -324,6 +344,9 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
   await page.getByRole('alert').filter({ hasText: '无法保存文件' }).waitFor()
   assert.equal(await editor.inputValue(), '失败时保留的内容')
   assert.equal(await unsaved.count(), 1)
+  await showFileButton.click()
+  await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
+  assert.equal(await shownFiles.evaluate((paths) => paths.at(-1)), outputFile)
   await assert.rejects(
     page.evaluate(() => window.electronAPI.openTextFile('invalid')),
     /Expected an unsaved changes flag/,
@@ -375,12 +398,32 @@ test('Starter page interactions, text files and theme', { timeout: 30000 }, asyn
     page.evaluate(() => window.electronAPI.openTextFile(false, 'arbitrary-path.txt')),
   )
 
+  // A later successful save replaces the target; a missing file must not be revealed.
+  const latestFile = join(profile, '最近保存.txt')
+  await chooseFiles(null, latestFile)
+  await page.evaluate(() => window.electronAPI.saveTextFile('Another saved file'))
+  await showFileButton.click()
+  await page.waitForFunction(() => !window.document.querySelector('#text-file-content').disabled)
+  assert.equal(await shownFiles.evaluate((paths) => paths.at(-1)), latestFile)
+  const revealCount = await shownFiles.evaluate((paths) => paths.length)
+  await rm(latestFile)
+  await showFileButton.click()
+  await page.getByRole('alert').filter({ hasText: '无法显示文件' }).waitFor()
+  assert.equal(await shownFiles.evaluate((paths) => paths.length), revealCount)
+  assert.equal(await editor.inputValue(), '失败时保留的内容')
+
   const rendererURL = page.url()
   await page.evaluate(() => window.history.replaceState(null, '', '?untrusted=1'))
   await assert.rejects(
     page.evaluate(() => window.electronAPI.openTextFile(false)),
     /Unexpected IPC sender/,
   )
+  await assert.rejects(
+    page.evaluate(() => window.electronAPI.showSavedFile()),
+    /Unexpected IPC sender/,
+  )
+  assert.equal(await shownFiles.evaluate((paths) => paths.length), revealCount)
+  await shownFiles.dispose()
   await assert.rejects(
     page.evaluate(() => window.electronAPI.saveTextFile('text')),
     /Unexpected IPC sender/,

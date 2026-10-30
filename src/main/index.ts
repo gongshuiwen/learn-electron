@@ -20,7 +20,7 @@ import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
 import { createApplicationMenu, createTray, registerContextMenu } from './menu'
-import { confirmDiscardChanges, openTextFile, saveTextFile } from './text-files'
+import { confirmDiscardChanges, openTextFile, saveTextFile, showSavedFile } from './text-files'
 import { showNotification } from './notifications'
 import icon from '../../build/icon.png?asset'
 import windowsIcon from '../../build/icon.ico?asset'
@@ -204,6 +204,7 @@ app
     ipcMain.handle(IPC_CHANNELS.saveTextFile, (event, content: unknown) =>
       saveTextFile(validateSender(event), content),
     )
+    ipcMain.handle(IPC_CHANNELS.showSavedFile, (event) => showSavedFile(validateSender(event)))
 
     createApplicationMenu()
     await createWindow()
