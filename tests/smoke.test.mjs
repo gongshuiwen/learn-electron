@@ -68,10 +68,18 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
     return {
       checkUpdates: menu.getMenuItemById('check-for-updates').enabled,
       openLogs: menu.getMenuItemById('open-logs').enabled,
+      launchAtLogin: menu.getMenuItemById('launch-at-login').enabled,
+      launchAtLoginVisible: menu.getMenuItemById('launch-at-login').visible,
       visible: process.platform === 'darwin' || BrowserWindow.getAllWindows()[0].isMenuBarVisible(),
     }
   })
-  assert.deepEqual(menu, { checkUpdates: true, openLogs: true, visible: true })
+  assert.deepEqual(menu, {
+    checkUpdates: true,
+    openLogs: true,
+    launchAtLogin: false,
+    launchAtLoginVisible: process.platform === 'win32',
+    visible: true,
+  })
   const logsDirectory = await desktop.evaluate(async ({ Menu, shell }) => {
     const original = shell.openPath
     const opened = new Promise((resolve) => {
@@ -134,6 +142,90 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
   assert.equal((await page.evaluate(() => window.electronAPI.getAppInfo())).name, manifest.name)
   assert.deepEqual(errors, [])
 })
+
+test(
+  'Launch at login follows system settings and reports failed changes',
+  { timeout: 30000, skip: process.platform !== 'win32' },
+  async (t) => {
+    const profile = await mkdtemp(join(tmpdir(), 'learn-electron-login-'))
+    let desktop
+    t.after(async () => {
+      try {
+        await desktop?.close()
+      } finally {
+        await rm(profile, { recursive: true, force: true })
+      }
+    })
+    // Simulate system settings before menu creation; never modify the real registry.
+    const bootstrap = join(profile, 'login-test.cjs')
+    await writeFile(
+      bootstrap,
+      `
+      const { app, Menu, dialog } = require('electron')
+      const probe = process.loginProbe = {
+        registered: true, enabled: true, writes: [], errors: [], failure: null
+      }
+      app.getLoginItemSettings = () => ({
+        openAtLogin: probe.registered,
+        executableWillLaunchAtLogin: probe.registered && probe.enabled
+      })
+      app.setLoginItemSettings = (settings) => {
+        probe.writes.push(settings)
+        if (probe.failure === 'throw') throw new Error('Simulated registry failure')
+        if (probe.failure === 'noop') return
+        probe.registered = settings.openAtLogin
+        probe.enabled = true
+      }
+      dialog.showErrorBox = (title) => probe.errors.push(title)
+      const packaged = Object.getOwnPropertyDescriptor(app, 'isPackaged')
+      Object.defineProperty(app, 'isPackaged', { configurable: true, value: true })
+      const setMenu = Menu.setApplicationMenu
+      Menu.setApplicationMenu = (menu) => {
+        Object.defineProperty(app, 'isPackaged', packaged)
+        return setMenu(menu)
+      }
+      import(${JSON.stringify(pathToFileURL(join(root, 'out/main/index.js')).href)})
+      `,
+    )
+    desktop = await electron.launch({
+      args: [bootstrap, `--user-data-dir=${profile}`],
+      cwd: root,
+      chromiumSandbox: true,
+      env: environment,
+      timeout: 15000,
+    })
+    const page = await desktop.firstWindow()
+    await page.locator('#root > *').first().waitFor()
+    const result = await desktop.evaluate(({ app, Menu, BrowserWindow }) => {
+      const item = Menu.getApplicationMenu().getMenuItemById('launch-at-login')
+      const probe = process.loginProbe
+      const initial = { checked: item.checked, enabled: item.enabled, writes: probe.writes.length }
+      const states = []
+      item.click()
+      states.push(item.checked)
+      item.click()
+      states.push(item.checked)
+      // Task Manager can disable an entry while its Run key still exists.
+      probe.enabled = false
+      app.emit('browser-window-focus', {}, BrowserWindow.getAllWindows()[0])
+      states.push(item.checked)
+      item.click()
+      states.push(item.checked)
+      for (const failure of ['throw', 'noop']) {
+        probe.failure = failure
+        item.click()
+        states.push(item.checked)
+      }
+      return { initial, states, writes: probe.writes, errors: probe.errors }
+    })
+    assert.deepEqual(result, {
+      initial: { checked: true, enabled: true, writes: 0 },
+      states: [false, true, false, true, true, true],
+      writes: [false, true, true, false, false].map((openAtLogin) => ({ openAtLogin })),
+      errors: ['无法修改开机启动', '无法修改开机启动'],
+    })
+  },
+)
 
 test(
   'Update downloads clear taskbar progress and listeners before prompting',

@@ -76,6 +76,29 @@ async function openHelpPage(url: string): Promise<void> {
 }
 
 export function createApplicationMenu(): void {
+  const launchAtLogin: MenuItemConstructorOptions = {
+    id: 'launch-at-login',
+    label: '开机启动',
+    type: 'checkbox',
+    visible: process.platform === 'win32',
+    enabled: process.platform === 'win32' && app.isPackaged,
+    checked:
+      process.platform === 'win32' &&
+      app.isPackaged &&
+      app.getLoginItemSettings().executableWillLaunchAtLogin,
+    click: (item) => {
+      try {
+        app.setLoginItemSettings({ openAtLogin: item.checked })
+        if (app.getLoginItemSettings().executableWillLaunchAtLogin !== item.checked) {
+          throw new Error('Login item setting did not take effect')
+        }
+      } catch (error) {
+        item.checked = !item.checked
+        log.error('Unable to change launch at login:', error)
+        dialog.showErrorBox('无法修改开机启动', '请检查 Windows 启动应用设置后重试。')
+      }
+    },
+  }
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
@@ -83,6 +106,7 @@ export function createApplicationMenu(): void {
         submenu: [
           { role: 'about', label: '关于' },
           { type: 'separator' },
+          launchAtLogin,
           {
             id: 'check-for-updates',
             label: '检查更新…',
@@ -125,4 +149,10 @@ export function createApplicationMenu(): void {
       },
     ]),
   )
+  const loginItem = Menu.getApplicationMenu()?.getMenuItemById('launch-at-login')
+  if (loginItem?.enabled) {
+    app.on('browser-window-focus', () => {
+      loginItem.checked = app.getLoginItemSettings().executableWillLaunchAtLogin
+    })
+  }
 }
