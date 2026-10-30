@@ -693,6 +693,60 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
     bounds,
   )
 
+  const page = await desktop.firstWindow()
+  await page.evaluate(() => {
+    window.layoutTestValue = 'preserved'
+  })
+  let resetBounds
+  for (const mode of process.platform === 'linux'
+    ? ['normal']
+    : ['normal', 'maximized', 'fullscreen']) {
+    const result = await desktop.evaluate(async ({ BrowserWindow, Menu, screen }, mode) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (mode !== 'normal') {
+        await new Promise((resolve) => {
+          win.once(mode === 'maximized' ? 'maximize' : 'enter-full-screen', resolve)
+          if (mode === 'maximized') win.maximize()
+          else win.setFullScreen(true)
+        })
+      }
+      const area = screen.getDisplayMatching(win.getBounds()).workArea
+      const leftFullscreen = win.isFullScreen()
+        ? new Promise((resolve) => win.once('leave-full-screen', resolve))
+        : Promise.resolve()
+      Menu.getApplicationMenu().getMenuItemById('reset-window-layout').click({}, win)
+      await leftFullscreen
+      return {
+        area,
+        bounds: win.getBounds(),
+        maximized: win.isMaximized(),
+        fullscreen: win.isFullScreen(),
+      }
+    }, mode)
+    assert.equal(result.maximized, false)
+    assert.equal(result.fullscreen, false)
+    const { area, bounds: actual } = result
+    assert.ok(Math.abs(actual.width - Math.min(1080, area.width)) <= 1)
+    assert.ok(Math.abs(actual.height - Math.min(760, area.height)) <= 1)
+    assert.ok(Math.abs(actual.x - (area.x + (area.width - actual.width) / 2)) <= 1)
+    assert.ok(Math.abs(actual.y - (area.y + (area.height - actual.height) / 2)) <= 1)
+    assert.equal(await page.evaluate(() => window.layoutTestValue), 'preserved')
+    resetBounds = actual
+  }
+  await desktop.close()
+  assert.deepEqual(JSON.parse(await readFile(stateFile, 'utf8')), {
+    ...resetBounds,
+    maximized: false,
+  })
+  await launch()
+  assert.deepEqual(
+    await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds()),
+    resetBounds,
+  )
+  await desktop.evaluate(({ BrowserWindow }, bounds) => {
+    BrowserWindow.getAllWindows()[0].setBounds(bounds)
+  }, bounds)
+
   // Headless Xvfb has no window manager to perform maximize/minimize operations.
   if (process.platform !== 'linux') {
     await desktop.evaluate(

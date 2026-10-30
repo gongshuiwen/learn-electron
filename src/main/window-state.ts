@@ -1,5 +1,5 @@
 import { screen } from 'electron'
-import type { Rectangle } from 'electron'
+import type { BaseWindow, Rectangle } from 'electron'
 import Store from 'electron-store'
 import log from 'electron-log/main'
 
@@ -9,13 +9,20 @@ interface WindowState extends Rectangle {
 
 let store: Store<WindowState> | undefined
 
+function defaultBounds(area: Rectangle): Rectangle {
+  const width = Math.min(1080, area.width)
+  const height = Math.min(760, area.height)
+  return {
+    x: area.x + Math.round((area.width - width) / 2),
+    y: area.y + Math.round((area.height - height) / 2),
+    width,
+    height,
+  }
+}
+
 export function readWindowState(): WindowState {
-  const primary = screen.getPrimaryDisplay().workArea
   let state: WindowState = {
-    x: primary.x + Math.round((primary.width - 1080) / 2),
-    y: primary.y + Math.round((primary.height - 760) / 2),
-    width: 1080,
-    height: 760,
+    ...defaultBounds(screen.getPrimaryDisplay().workArea),
     maximized: false,
   }
 
@@ -47,6 +54,32 @@ export function readWindowState(): WindowState {
     height,
     maximized: state.maximized,
   }
+}
+
+export function applyWindowBounds(window: BaseWindow, bounds: Rectangle): void {
+  window.setMinimumSize(Math.min(640, bounds.width), Math.min(560, bounds.height))
+  window.setBounds(bounds)
+  // Native rounding can extend the right/bottom edge past the work area at fractional DPI.
+  const area = screen.getDisplayMatching(bounds).workArea
+  const actual = window.getBounds()
+  const width = bounds.width - Math.max(0, actual.x + actual.width - area.x - area.width)
+  const height = bounds.height - Math.max(0, actual.y + actual.height - area.y - area.height)
+  if (width !== bounds.width || height !== bounds.height) {
+    window.setMinimumSize(Math.min(640, width), Math.min(560, height))
+    window.setBounds({ ...bounds, width, height })
+  }
+}
+
+export function resetWindowLayout(window: BaseWindow): void {
+  if (window.isFullScreen()) {
+    window.once('leave-full-screen', () => resetWindowLayout(window))
+    window.setFullScreen(false)
+    return
+  }
+  const area = screen.getDisplayMatching(window.getBounds()).workArea
+  if (window.isMinimized()) window.restore()
+  if (window.isMaximized()) window.unmaximize()
+  applyWindowBounds(window, defaultBounds(area))
 }
 
 export function saveWindowState(state: WindowState): void {

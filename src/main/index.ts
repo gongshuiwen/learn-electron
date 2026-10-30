@@ -1,21 +1,12 @@
 import { join } from 'node:path'
 import { release, type } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import {
-  app,
-  BrowserWindow,
-  clipboard,
-  dialog,
-  ipcMain,
-  nativeTheme,
-  screen,
-  session,
-} from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, session } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { IPC_CHANNELS } from '../shared/ipc'
 import type { AppInfo } from '../shared/ipc'
-import { readWindowState, saveWindowState } from './window-state'
+import { applyWindowBounds, readWindowState, saveWindowState } from './window-state'
 import { setTheme, windowBackground } from './theme'
 import { getSettingsStore } from './settings'
 import { checkForAppUpdates } from './updater'
@@ -84,16 +75,7 @@ async function createWindow(): Promise<void> {
   })
   window.once('ready-to-show', () => {
     // Reapply after native frame creation to avoid size drift at fractional DPI.
-    window.setBounds(bounds)
-    // Native rounding can still extend the right/bottom edge past the work area.
-    const area = screen.getDisplayMatching(bounds).workArea
-    const actual = window.getBounds()
-    const width = bounds.width - Math.max(0, actual.x + actual.width - area.x - area.width)
-    const height = bounds.height - Math.max(0, actual.y + actual.height - area.y - area.height)
-    if (width !== bounds.width || height !== bounds.height) {
-      window.setMinimumSize(Math.min(640, width), Math.min(560, height))
-      window.setBounds({ ...bounds, width, height })
-    }
+    applyWindowBounds(window, bounds)
     if (wasMaximized) window.maximize()
     window.show()
   })

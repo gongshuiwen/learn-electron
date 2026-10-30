@@ -3,6 +3,7 @@ import { app, dialog, Menu, shell, Tray } from 'electron'
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
 import log from 'electron-log/main'
 import { checkForAppUpdates } from './updater'
+import { resetWindowLayout } from './window-state'
 
 export function createTray(window: BrowserWindow, icon: string): void {
   if (process.platform !== 'win32') return
@@ -133,7 +134,27 @@ export function createApplicationMenu(): void {
         ],
       },
       { role: 'editMenu', label: '编辑' },
-      { role: 'viewMenu', label: '视图' },
+      {
+        label: '视图',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { role: 'resetZoom' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { type: 'separator' },
+          { role: 'togglefullscreen' },
+          {
+            id: 'reset-window-layout',
+            label: '恢复默认窗口布局',
+            click: (_item, window) => {
+              if (window) resetWindowLayout(window)
+            },
+          },
+        ],
+      },
       {
         role: 'help',
         label: '帮助',
