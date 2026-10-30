@@ -56,13 +56,13 @@ export function registerContextMenu(window: BrowserWindow): void {
   })
 }
 
-async function openLogsDirectory(): Promise<void> {
+async function openDirectory(path: string, label: string): Promise<void> {
   try {
-    const error = await shell.openPath(dirname(log.transports.file.getFile().path))
+    const error = await shell.openPath(path)
     if (error) throw new Error(error)
   } catch (error) {
-    log.error('Unable to open logs directory:', error)
-    dialog.showErrorBox('无法打开日志目录', '请检查日志目录是否存在以及访问权限。')
+    log.error(`Unable to open directory (${path}):`, error)
+    dialog.showErrorBox(`无法打开${label}`, `请检查${label}是否存在以及访问权限。`)
   }
 }
 
@@ -118,7 +118,14 @@ export function createApplicationMenu(): void {
             id: 'open-logs',
             label: '打开日志目录',
             click: () => {
-              void openLogsDirectory()
+              void openDirectory(dirname(log.transports.file.getFile().path), '日志目录')
+            },
+          },
+          {
+            id: 'open-config',
+            label: '打开配置目录',
+            click: () => {
+              void openDirectory(app.getPath('userData'), '配置目录')
             },
           },
           { type: 'separator' },
