@@ -70,6 +70,8 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
       openLogs: menu.getMenuItemById('open-logs').enabled,
       launchAtLogin: menu.getMenuItemById('launch-at-login').enabled,
       launchAtLoginVisible: menu.getMenuItemById('launch-at-login').visible,
+      wakeShortcutVisible: menu.getMenuItemById('wake-shortcut').visible,
+      wakeShortcutChecked: menu.getMenuItemById('wake-shortcut').checked,
       visible: process.platform === 'darwin' || BrowserWindow.getAllWindows()[0].isMenuBarVisible(),
     }
   })
@@ -78,6 +80,8 @@ test('Electron renders, handles IPC and isolates the renderer', { timeout: 30000
     openLogs: true,
     launchAtLogin: false,
     launchAtLoginVisible: process.platform === 'win32',
+    wakeShortcutVisible: process.platform === 'win32',
+    wakeShortcutChecked: false,
     visible: true,
   })
   const logsDirectory = await desktop.evaluate(async ({ Menu, shell }) => {
@@ -305,7 +309,7 @@ test(
 )
 
 test(
-  'Windows tray restores, hides and quits through the normal close flow',
+  'Windows tray and wake shortcut restore windows and respect cancelled exits',
   { timeout: 30000, skip: process.platform !== 'win32' },
   async (t) => {
     const profile = await mkdtemp(join(tmpdir(), 'learn-electron-tray-'))
@@ -323,15 +327,34 @@ test(
     await writeFile(
       bootstrap,
       `
-      const { app, Tray } = require('electron')
+      const { app, Tray, globalShortcut, dialog } = require('electron')
       const { writeFileSync } = require('node:fs')
+      const shortcut = process.shortcutProbe = {
+        callback: null, failure: null, requests: [], unregisters: [], errors: []
+      }
+      globalShortcut.register = (key, callback) => {
+        shortcut.requests.push(key)
+        if (shortcut.failure === 'throw') throw new Error('Simulated registration failure')
+        if (shortcut.failure === 'occupied') return false
+        shortcut.callback = callback
+        return true
+      }
+      globalShortcut.unregister = (key) => {
+        shortcut.unregisters.push(key)
+        shortcut.callback = null
+      }
+      dialog.showErrorBox = (title) => shortcut.errors.push(title)
       const original = Tray.prototype.setContextMenu
       Tray.prototype.setContextMenu = function(menu) {
         process.trayProbe = { tray: this, menu }
         return original.call(this, menu)
       }
-      app.on('will-quit', () => {
-        writeFileSync(${JSON.stringify(destroyedFile)}, String(process.trayProbe.tray.isDestroyed()))
+      app.on('quit', () => {
+        writeFileSync(${JSON.stringify(destroyedFile)}, JSON.stringify({
+          destroyed: process.trayProbe.tray.isDestroyed(),
+          registered: !!shortcut.callback,
+          unregisters: shortcut.unregisters
+        }))
       })
       import(${JSON.stringify(pathToFileURL(join(root, 'out/main/index.js')).href)})
     `,
@@ -354,6 +377,41 @@ test(
       ),
       ['显示窗口', '隐藏窗口', '退出应用'],
     )
+    const shortcutState = await desktop.evaluate(({ Menu }) => {
+      const item = Menu.getApplicationMenu().getMenuItemById('wake-shortcut')
+      const probe = process.shortcutProbe
+      const initial = { checked: item.checked, registrations: probe.requests.length }
+      const failedStates = []
+      for (const failure of ['occupied', 'throw']) {
+        probe.failure = failure
+        item.click()
+        failedStates.push(item.checked)
+      }
+      probe.failure = null
+      item.click()
+      const enabled = item.checked && !!probe.callback
+      item.click()
+      const disabled = !item.checked && !probe.callback
+      item.click()
+      return {
+        initial,
+        failedStates,
+        enabled,
+        disabled,
+        requests: probe.requests,
+        errors: probe.errors,
+        registered: item.checked && !!probe.callback,
+      }
+    })
+    assert.deepEqual(shortcutState, {
+      initial: { checked: false, registrations: 0 },
+      failedStates: [false, false],
+      enabled: true,
+      disabled: true,
+      requests: Array(4).fill('Ctrl+Alt+E'),
+      errors: ['无法启用全局快捷键', '无法启用全局快捷键'],
+      registered: true,
+    })
     await page.evaluate(() => {
       window.trayTestValue = 'preserved'
     })
@@ -362,6 +420,12 @@ test(
       await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()),
       false,
     )
+    await desktop.evaluate(() => process.shortcutProbe.callback())
+    assert.equal(
+      await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()),
+      true,
+    )
+    await desktop.evaluate(() => process.trayProbe.menu.items[1].click())
     await desktop.evaluate(() => process.trayProbe.tray.emit('click', {}, {}, {}))
     assert.equal(
       await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()),
@@ -377,6 +441,21 @@ test(
       await new Promise((resolve) => {
         window.once('restore', resolve)
         process.trayProbe.menu.items[0].click()
+      })
+    })
+    assert.equal(
+      await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()),
+      false,
+    )
+    await desktop.evaluate(async ({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      await new Promise((resolve) => {
+        window.once('minimize', resolve)
+        window.minimize()
+      })
+      await new Promise((resolve) => {
+        window.once('restore', resolve)
+        process.shortcutProbe.callback()
       })
     })
     assert.equal(
@@ -405,6 +484,7 @@ test(
       true,
     )
     assert.equal(await desktop.evaluate(() => process.trayProbe.tray.isDestroyed()), false)
+    assert.equal(await desktop.evaluate(() => !!process.shortcutProbe.callback), true)
     const exited = desktop.waitForEvent('close')
     await desktop.evaluate(({ dialog }) => {
       dialog.showMessageBoxSync = () => 1
@@ -412,7 +492,11 @@ test(
     })
     await exited
     desktop = undefined
-    assert.equal(await readFile(destroyedFile, 'utf8'), 'true')
+    assert.deepEqual(JSON.parse(await readFile(destroyedFile, 'utf8')), {
+      destroyed: true,
+      registered: false,
+      unregisters: ['Ctrl+Alt+E', 'Ctrl+Alt+E'],
+    })
   },
 )
 

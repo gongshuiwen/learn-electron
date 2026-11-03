@@ -1,34 +1,38 @@
 import { dirname } from 'node:path'
-import { app, dialog, Menu, shell, Tray } from 'electron'
-import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, Menu, shell, Tray } from 'electron'
+import type { MenuItemConstructorOptions } from 'electron'
 import log from 'electron-log/main'
 import { checkForAppUpdates } from './updater'
 import { resetWindowLayout } from './window-state'
 
+const WAKE_SHORTCUT = 'Ctrl+Alt+E'
+
+function showWindow(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+}
+
 export function createTray(window: BrowserWindow, icon: string): void {
   if (process.platform !== 'win32') return
   const tray = new Tray(icon)
-  const showWindow = (): void => {
-    if (window.isMinimized()) window.restore()
-    window.show()
-    window.focus()
-  }
+  const show = (): void => showWindow(window)
   tray.setToolTip(app.getName())
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: '显示窗口', click: showWindow },
+      { label: '显示窗口', click: show },
       { label: '隐藏窗口', click: () => window.hide() },
       { type: 'separator' },
       {
         label: '退出应用',
         click: () => {
-          showWindow()
+          show()
           app.quit()
         },
       },
     ]),
   )
-  tray.on('click', showWindow)
+  tray.on('click', show)
   // This listener retains the tray until its window is actually closed.
   window.once('closed', () => tray.destroy())
 }
@@ -109,6 +113,30 @@ export function createApplicationMenu(): void {
           { type: 'separator' },
           launchAtLogin,
           {
+            id: 'wake-shortcut',
+            label: `全局快捷键唤起窗口（${WAKE_SHORTCUT}）`,
+            type: 'checkbox',
+            visible: process.platform === 'win32',
+            enabled: process.platform === 'win32',
+            click: (item) => {
+              if (!item.checked) {
+                globalShortcut.unregister(WAKE_SHORTCUT)
+                return
+              }
+              try {
+                const registered = globalShortcut.register(WAKE_SHORTCUT, () => {
+                  const window = BrowserWindow.getAllWindows()[0]
+                  if (window) showWindow(window)
+                })
+                if (!registered) throw new Error('Wake shortcut registration failed')
+              } catch (error) {
+                item.checked = false
+                log.error('Unable to register wake shortcut:', error)
+                dialog.showErrorBox('无法启用全局快捷键', `${WAKE_SHORTCUT} 可能已被其他程序占用。`)
+              }
+            },
+          },
+          {
             id: 'check-for-updates',
             label: '检查更新…',
             click: () => {
@@ -182,5 +210,8 @@ export function createApplicationMenu(): void {
     app.on('browser-window-focus', () => {
       loginItem.checked = app.getLoginItemSettings().executableWillLaunchAtLogin
     })
+  }
+  if (process.platform === 'win32') {
+    app.once('will-quit', () => globalShortcut.unregister(WAKE_SHORTCUT))
   }
 }
