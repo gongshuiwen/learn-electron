@@ -1,6 +1,7 @@
+import { platform } from '@/platform'
 import { useEffect, useEffectEvent, useState } from 'react'
 import { FolderOpen, FolderSearch, Save } from 'lucide-react'
-import type { TextFile } from '../../../shared/ipc'
+import type { TextFile } from '../../shared/types'
 import { Button } from '@/components/ui/button'
 
 export function TextFileExample() {
@@ -27,7 +28,7 @@ export function TextFileExample() {
     setError(null)
     setMessage(null)
     try {
-      const result = await window.electronAPI.openTextFile(hasUnsavedChanges, droppedFile)
+      const result = await platform.openTextFile(hasUnsavedChanges, droppedFile)
       if (result) {
         setFile(result)
         setSavedContent(result.content)
@@ -44,12 +45,15 @@ export function TextFileExample() {
     setError(null)
     setMessage(null)
     try {
-      const name = await window.electronAPI.saveTextFile(file.content)
-      if (name) {
+      const result = await platform.saveTextFile(file.content, file.name)
+      if (result?.status === 'saved') {
+        const { name } = result
         setFile((current) => ({ ...current, name }))
         setSavedContent(file.content)
         setHasSavedFile(true)
         setMessage(`已保存：${name}`)
+      } else if (result?.status === 'download-started') {
+        setMessage(`已发起下载：${result.name}。请确认下载完成；未保存提示将保留。`)
       }
     } catch {
       setError('无法保存文件，请检查写入权限，并确保内容不超过 1 MiB。')
@@ -62,7 +66,7 @@ export function TextFileExample() {
     setPending('show')
     setError(null)
     try {
-      await window.electronAPI.showSavedFile()
+      await platform.showSavedFile?.()
     } catch {
       setError('无法显示文件，请确认最近保存的文件仍然存在且可访问。')
     } finally {
@@ -117,9 +121,9 @@ export function TextFileExample() {
           onClick={() => void saveFile()}
         >
           <Save aria-hidden="true" />
-          {pending === 'save' ? '正在保存…' : '另存为'}
+          {pending === 'save' ? '正在保存…' : platform.kind === 'web' ? '下载文本文件' : '另存为'}
         </Button>
-        {hasSavedFile ? (
+        {hasSavedFile && platform.showSavedFile ? (
           <Button
             variant="outline"
             disabled={pending !== null}

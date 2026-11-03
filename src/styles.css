@@ -1,4 +1,6 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source('./');
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
@@ -6,7 +8,11 @@
 
 @layer base {
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
+  }
+
+  :root.dark {
+    color-scheme: dark;
   }
 
   body {

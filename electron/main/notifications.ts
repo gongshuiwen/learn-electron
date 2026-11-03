@@ -1,7 +1,7 @@
 import { Notification } from 'electron'
 import type { BrowserWindow } from 'electron'
 import log from 'electron-log/main'
-import type { NotificationResult } from '../shared/ipc'
+import type { NotificationResult } from '../../shared/types'
 
 // Retain the latest notification so its click handler survives native delivery.
 let notification: Notification | undefined

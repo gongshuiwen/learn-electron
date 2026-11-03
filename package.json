@@ -25,7 +25,11 @@
     "test:smoke": "npm run build && install-electron && node --test tests/smoke.test.mjs",
     "test:example": "npm run build && install-electron && node --test tests/example.test.mjs",
     "prepreview": "install-electron",
-    "preview": "electron-vite preview --skipBuild"
+    "preview": "electron-vite preview --skipBuild",
+    "dev:web": "vite --config vite.web.config.ts",
+    "build:web": "npm run typecheck && vite build --config vite.web.config.ts",
+    "preview:web": "vite preview --config vite.web.config.ts",
+    "test:web": "npm run build:web && node --test tests/web.test.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

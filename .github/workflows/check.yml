@@ -38,3 +38,6 @@ jobs:
       - name: Smoke test (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:smoke
+      - name: Web browser test (Windows)
+        if: runner.os == 'Windows'
+        run: npm run test:web

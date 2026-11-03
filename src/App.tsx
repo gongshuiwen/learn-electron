@@ -1,17 +1,23 @@
+import { platform } from '@/platform'
 import { useState } from 'react'
 import { Info, Plus } from 'lucide-react'
-import type { AppInfo } from '../../shared/ipc'
+import type { ApplicationInfo } from './platform/contracts'
 import { RuntimeInfo } from './components/RuntimeInfo'
 import { ThemeSelect } from './components/ThemeSelect'
 import { Button } from '@/components/ui/button'
 import { TextFileExample } from './components/TextFileExample'
 import { NotificationExample } from './components/NotificationExample'
 
-const technologies = ['Electron', 'TypeScript', 'React', 'Tailwind CSS']
+const technologies = [
+  platform.kind === 'desktop' ? 'Electron' : 'Web',
+  'TypeScript',
+  'React',
+  'Tailwind CSS',
+]
 
 export default function App() {
   const [count, setCount] = useState(0)
-  const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
+  const [appInfo, setAppInfo] = useState<ApplicationInfo | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -21,9 +27,9 @@ export default function App() {
     setAppInfo(null)
 
     try {
-      setAppInfo(await window.electronAPI.getAppInfo())
+      setAppInfo(await platform.getAppInfo())
     } catch {
-      setError('无法读取应用信息，请在 Electron 窗口中重试。')
+      setError('无法读取应用信息，请重试。')
     } finally {
       setPending(false)
     }
@@ -37,10 +43,12 @@ export default function App() {
           LEARN / ELECTRON
         </p>
         <h1 className="text-4xl font-semibold tracking-tight text-stone-900 dark:text-stone-100 sm:text-5xl">
-          从这里开始，构建桌面应用。
+          {platform.kind === 'desktop'
+            ? '从这里开始，构建桌面应用。'
+            : '从这里开始，构建 Web 应用。'}
         </h1>
         <p className="mt-5 max-w-2xl text-base leading-7 text-stone-600 dark:text-stone-400">
-          用 React 编写界面，用 Tailwind CSS 添加样式，通过安全的预加载桥接调用桌面能力。
+          用 React 编写界面，用 Tailwind CSS 添加样式，在桌面和浏览器中使用同一套页面。
         </p>
         <ul aria-label="技术栈" className="mt-6 flex flex-wrap gap-2">
           {technologies.map((technology) => (
@@ -68,10 +76,10 @@ export default function App() {
         </section>
 
         <section className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-6">
-          <p className="text-xs font-medium tracking-widest text-stone-400">02 / ELECTRON IPC</p>
-          <h2 className="mt-3 text-lg font-semibold">桌面进程通信</h2>
+          <p className="text-xs font-medium tracking-widest text-stone-400">02 / RUNTIME</p>
+          <h2 className="mt-3 text-lg font-semibold">运行环境</h2>
           <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
-            通过带类型的 API 从主进程读取运行环境。
+            读取当前应用的运行信息。
           </p>
           <Button
             variant="outline"
@@ -97,7 +105,7 @@ export default function App() {
       <NotificationExample />
 
       <footer className="mt-8 text-xs leading-6 text-stone-500 dark:text-stone-400">
-        编辑 <code className="text-stone-700 dark:text-stone-300">src/renderer/src/App.tsx</code>
+        编辑 <code className="text-stone-700 dark:text-stone-300">src/App.tsx</code>
         ，保存后即可查看更新。
       </footer>
     </main>

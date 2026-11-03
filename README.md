@@ -1,13 +1,13 @@
 # Learn Electron
 
-Electron + TypeScript + React + Tailwind CSS 桌面应用基础项目，使用 electron-vite 管理本地开发、热更新和源码编译，使用 electron-builder 打包应用。
+Web + Electron + TypeScript + React + Tailwind CSS 通用模板，使用 electron-vite 管理本地开发、热更新和源码编译，使用 electron-builder 打包应用。
 
 ## 使用此模板
 
 1. 将项目复制到自己的仓库，修改 `package.json` 的 `name`、`version`、`description` 和 `author`，然后运行 `npm install --package-lock-only` 同步锁文件。
-2. 修改 `src/renderer/index.html` 的页面标题、`electron-builder.yml` 的 `appId`、`productName` 和 `publish` 仓库，以及本 README 的项目名称和说明。`appId` 应使用自己的唯一标识，发布后保持稳定，并同步修改 `src/main/index.ts` 中用于 Windows 通知的应用标识。
-3. 替换 `src/renderer/src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`components/TextFileExample.tsx`、`components/NotificationExample.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
-4. 按需扩展 `src/shared/ipc.ts`、主进程和 preload 的具体接口。基础测试使用 `getAppInfo` 检查 IPC，替换该接口时同步更新测试。
+2. 修改 `index.html` 的页面标题、`electron-builder.yml` 的 `appId`、`productName` 和 `publish` 仓库，以及本 README 的项目名称和说明。`appId` 应使用自己的唯一标识，发布后保持稳定，并同步修改 `electron/main/index.ts` 中用于 Windows 通知的应用标识。
+3. 替换 `src/App.tsx` 的示例界面；不需要时可删除 `components/RuntimeInfo.tsx`、`components/TextFileExample.tsx`、`components/NotificationExample.tsx`、`tests/example.test.mjs` 和 `test:example` 命令。保留 `ErrorBoundary` 和基础启动检查。
+4. 按需扩展 `shared/ipc.ts`、主进程和 preload 的具体接口。基础测试使用 `getAppInfo` 检查 IPC，替换该接口时同步更新测试。
 5. 模板采用 [MIT 许可证](LICENSE)，使用模板代码时保留原有版权和许可声明，可为新增代码补充自己的版权信息。
 
 维护者如需启用 GitHub 的 **Use this template** 入口，先将稳定版本合入默认分支，再在仓库 Settings 中启用 **Template repository**。
@@ -25,7 +25,7 @@ npm run dev
 
 首次运行 `dev` 或 `preview` 时，`install-electron` 会下载 Electron 二进制文件；后续启动复用本地文件。Electron 新版本按需下载运行时，因此这里显式在启动前准备，兼容 electron-vite 的启动方式。
 
-首页包含 React 计数器，以及通过 preload 和 IPC 读取应用版本的示例。桌面 API 需要在 Electron 窗口内使用。
+首页包含 React 计数器，以及通过 preload 和 IPC 读取应用版本的示例。页面通过平台适配层选择桌面或浏览器实现。
 
 读取应用信息后，可点击“复制诊断信息”，将应用名称和版本、Electron / Chromium / Node.js 版本、系统类型及版本、应用运行架构复制为纯文本。展示和复制共用主进程的信息采集函数，剪贴板写入成功后显示反馈，失败可重试。
 
@@ -47,7 +47,7 @@ npm run dev
 
 UI 组件按 [shadcn/ui](https://ui.shadcn.com/docs/installation/manual) 的源码方式接入。目前只添加 `components/ui/button.tsx`，按首页需求保留 `default`、`outline` 两种样式，使用 `class-variance-authority` 管理变体、`cn` 合并 Tailwind 类名。组件源码由项目维护，沿用现有配色和 Electron 原生主题机制。
 
-`components.json` 使用 `new-york` 风格及直接颜色类（`cssVariables: false`），`@/` 指向渲染进程的 `src/renderer/src/`。后续在项目根目录运行 `npx shadcn@latest add <组件名>` 按需添加；新增组件时检查依赖和样式差异，保留基于 `prefers-color-scheme` 的深色模式。不要直接覆盖已定制的 Button。
+`components.json` 使用 `new-york` 风格及直接颜色类（`cssVariables: false`），`@/` 指向渲染进程的 `src/`。后续在项目根目录运行 `npx shadcn@latest add <组件名>` 按需添加；新增组件时检查依赖和样式差异，保留基于 `prefers-color-scheme` 的深色模式。不要直接覆盖已定制的 Button。
 
 同一用户数据目录只运行一个应用实例。重复启动会退出新进程，并显示、恢复和聚焦已有窗口；已有进程没有窗口时会重新创建。使用 Electron 原生单实例锁，开发模式同样生效，测试通过独立的临时用户目录隔离。
 
@@ -57,7 +57,7 @@ Windows 打包版本可在“应用 → 开机启动”中开启或关闭登录�
 
 Windows 可在“应用 → 全局快捷键唤起窗口（Ctrl+Alt+E）”中启用全局快捷键。启用后，即使应用没有焦点，也可显示、恢复并聚焦窗口。默认关闭，仅本次运行有效，不保存到配置；快捷键注册失败时提示并取消勾选。关闭开关或应用实际退出时注销，取消退出不会注销。其他平台不显示此菜单项。
 
-原生菜单提供“应用、编辑、视图、帮助”：可查看关于信息、手动检查更新、打开日志目录、打开配置目录或退出，并保留系统编辑、缩放和开发工具等常用操作。Windows / Linux 显示窗口菜单栏，macOS 使用系统菜单栏，首个菜单显示应用名称。“打开日志目录”使用当前日志文件的实际位置；“打开配置目录”打开当前 `userData` 目录，其中包含 `settings.json` 和 `window-state.json` 等应用数据。目录打开失败时记录日志并提示。“帮助”中的“项目主页”和“问题反馈”使用默认浏览器打开仓库及 Issues 页面，打开失败时记录日志并提示；复用模板时修改 `src/main/menu.ts` 中的两个固定地址即可。
+原生菜单提供“应用、编辑、视图、帮助”：可查看关于信息、手动检查更新、打开日志目录、打开配置目录或退出，并保留系统编辑、缩放和开发工具等常用操作。Windows / Linux 显示窗口菜单栏，macOS 使用系统菜单栏，首个菜单显示应用名称。“打开日志目录”使用当前日志文件的实际位置；“打开配置目录”打开当前 `userData` 目录，其中包含 `settings.json` 和 `window-state.json` 等应用数据。目录打开失败时记录日志并提示。“帮助”中的“项目主页”和“问题反馈”使用默认浏览器打开仓库及 Issues 页面，打开失败时记录日志并提示；复用模板时修改 `electron/main/menu.ts` 中的两个固定地址即可。
 
 右键编辑区可使用原生撤销、重做、剪切、复制、粘贴和全选菜单，操作是否可用由 Chromium 当前编辑状态决定；选中普通文本时只显示复制，空白区域不弹菜单。菜单直接在主进程监听 `context-menu` 并使用 Electron 内置角色执行操作，无需额外 IPC 或渲染组件。
 
@@ -88,6 +88,23 @@ Windows 可在“应用 → 全局快捷键唤起窗口（Ctrl+Alt+E）”中启
 
 格式选项和忽略路径统一放在 `.oxfmtrc.json`，lint 规则放在 `.oxlintrc.json`。Oxlint 使用原生 React 规则和 `oxlint-tsgolint` 类型感知检查；完整类型检查由 `tsc` 执行。
 
+## 独立 Web 端
+
+```sh
+npm run dev:web
+npm run build:web
+npm run preview:web
+npm run test:web
+```
+
+Web 与 Electron 共用 `src`，Web 构建输出到 `out/web`，可将该目录部署到静态托管服务。资源使用相对路径，支持子目录部署；当前没有客户端路由，如需增加路由可先使用 hash 路由。`preview:web` 仅用于本地预览，生产环境使用 HTTPS 静态服务。
+
+页面通过 `src/platform` 调用平台能力。入口检测 preload 提供的 `window.electronAPI`，有桥接时使用桌面实现，否则使用浏览器实现。组件不直接访问桥接对象，新增系统能力时先定义小接口，再实现平台差异。当前沿用单仓库、单前端入口，不引入依赖注入框架或后端服务。两套构建共用 `renderer.config.ts` 的插件、别名和 CSP；接入远程 API 时需按实际地址调整 CSP 的 `connect-src`。
+
+Web 主题保存到 localStorage，跟随系统时响应系统配色变化。文本通过选择文件或拖入打开，保留 1 MiB 和 UTF-8 校验；导出使用浏览器下载，不保证写盘成功，因此下载后仍保留未保存提示。Web 不显示“显示文件”按钮，关闭或刷新时使用浏览器默认的未保存确认，浏览器可能限制或不显示此提示。通知需浏览器支持、安全上下文和用户授权；不提供后台推送。剪贴板同样受浏览器权限限制。Web 与桌面的本地设置各自独立，不自动同步。
+
+`test:web` 使用已有的 `playwright-core` 和本机 Chrome，以无 preload 的浏览器验证生产构建、主题持久化、文件导入校验、下载和取消操作。可用 `PLAYWRIGHT_CHANNEL=msedge` 选择 Edge。Windows CI 执行该检查，桌面检查继续覆盖三个操作系统。
+
 ## 打包应用
 
 在 Windows 上运行：
@@ -99,7 +116,7 @@ npm run dist
 
 `pack` 生成 `dist/win-unpacked/Learn Electron.exe`，可直接运行，但分发时需要保留整个 `win-unpacked` 目录。`dist` 生成 `dist/Learn Electron Setup <版本>.exe`，使用 NSIS 默认的当前用户安装方式。
 
-配置集中在 `electron-builder.yml`，指定应用标识、名称、输出目录、应用文件、Windows 安装包格式和 GitHub 更新源。应用文件包含 `out/` 和 `LICENSE`，electron-builder 自动加入 `package.json` 及生产依赖；源码、测试和开发工具不会作为应用文件打包。沿用默认 ASAR 归档与 Electron 图标。
+配置集中在 `electron-builder.yml`，指定应用标识、名称、输出目录、应用文件、Windows 安装包格式和 GitHub 更新源。应用文件包含 `out/main/`、`out/preload/`、`out/renderer/` 和 `LICENSE`，不包含独立 Web 产物 `out/web/`，electron-builder 自动加入 `package.json` 及生产依赖；源码、测试和开发工具不会作为应用文件打包。沿用默认 ASAR 归档与 Electron 图标。
 
 首次打包需要下载 Electron 和打包工具，后续复用缓存。下载源可通过本机环境变量 `ELECTRON_MIRROR` 和 `ELECTRON_BUILDER_BINARIES_MIRROR` 调整。当前先支持 Windows 安装包，macOS / Linux 安装包、代码签名和自动发布流水线按需补充。`dist/` 已从 Git、lint 和格式检查中排除。
 
@@ -140,45 +157,44 @@ React 渲染错误由错误边界显示重新加载入口；异步事件错误�
 ## 项目结构
 
 ```text
-src/
-  main/index.ts                  # Electron 主进程：窗口生命周期、IPC 处理
-  main/window-state.ts           # 独立窗口状态存储与屏幕边界调整
-  main/theme.ts                  # 主题偏好与窗口背景
-  main/settings.ts               # electron-store 实例、类型和 Schema
-  main/updater.ts                # GitHub 更新检查、下载与原生安装提示
-  main/menu.ts                   # 原生应用菜单与目录入口
-  main/text-files.ts             # 原生文件对话框和 UTF-8 文本读写
-  main/notifications.ts          # 系统通知及点击恢复窗口
+electron/
+  main/                          # 桌面窗口、菜单、文件、通知、设置与更新
   preload/index.ts               # contextBridge：只暴露明确的桌面 API
-  shared/ipc.ts                  # IPC 通道、请求返回值和桥接接口类型
-  renderer/
-    index.html                   # 页面入口
-    src/
-      main.tsx                   # React 入口
-      App.tsx                    # 示例界面
-      components/RuntimeInfo.tsx # 运行环境展示
-      components/ThemeSelect.tsx # 可复用的主题选择控件
-      components/TextFileExample.tsx # 文本打开、编辑与另存为示例
-      components/NotificationExample.tsx # 系统通知示例
-      components/ErrorBoundary.tsx # React 渲染错误提示
-      env.d.ts                   # window.electronAPI 类型声明
-      styles.css                 # Tailwind CSS 入口和全局样式
-electron.vite.config.ts           # 三个进程的开发及编译配置
+src/
+  main.tsx                       # Web 与 Electron 共用的 React 入口
+  App.tsx                        # 示例界面
+  components/                    # 页面组件与基础 UI
+  platform/
+    contracts.ts                 # 前端平台接口
+    index.ts                     # 平台选择及桌面适配
+    web.ts                       # 浏览器实现
+  lib/                           # 前端工具函数
+  env.d.ts                       # 浏览器环境与可选桌面桥接声明
+  styles.css                     # Tailwind CSS 入口和全局样式
+shared/
+  types.ts                       # 跨进程数据类型及主题校验，不依赖 Electron
+  ipc.ts                         # IPC 通道与 ElectronAPI 桥接协议
+index.html                       # 共用 HTML 入口
+renderer.config.ts               # 共用前端插件、别名、应用信息和 CSP
+electron.vite.config.ts           # Electron 三个进程的入口与编译配置
+vite.web.config.ts               # 独立 Web 构建配置
 electron-builder.yml              # 应用打包与 Windows 安装包配置
 tsconfig.base.json                # 共享的严格 TypeScript 配置
-tsconfig.node.json                # 主进程、preload 与工具配置的类型环境
-tsconfig.web.json                 # React 渲染进程的浏览器类型环境
-tests/smoke.test.mjs              # 关键启动流程回归检查
-tests/example.test.mjs            # 可随示例页面替换或删除的交互检查
+tsconfig.node.json                # Electron 与构建工具的类型环境
+tsconfig.web.json                 # React 前端的浏览器类型环境
+tests/smoke.test.mjs              # 桌面关键启动流程回归检查
+tests/example.test.mjs            # 桌面示例交互检查
+tests/web.test.mjs                # 独立 Web 生产构建的浏览器检查
 ```
 
 ## 开发约定
 
-- 页面和组件放在 `src/renderer/src/`，样式直接使用 Tailwind 工具类。Tailwind 使用 `@tailwindcss/vite` 插件和 CSS 入口，无需额外的 PostCSS 或 Tailwind JavaScript 配置。
+- 页面和组件放在 `src/`，样式直接使用 Tailwind 工具类。Tailwind 使用 `@tailwindcss/vite` 插件和 CSS 入口，无需额外的 PostCSS 或 Tailwind JavaScript 配置。
+- 通用数据类型放在 `shared/types.ts`，IPC 通道和桥接接口放在 `shared/ipc.ts`；共享代码不导入 Electron 或 Node.js 运行时模块。
 - 主进程采用 ESM；preload 编译为单个 CommonJS 文件，兼容 Electron 的沙箱模式。
-- 窗口启用 `contextIsolation` 和 `sandbox`，关闭 `nodeIntegration`。渲染进程通过 `window.electronAPI` 调用允许的接口，不直接访问 Node.js 或 `ipcRenderer`。
+- 窗口启用 `contextIsolation` 和 `sandbox`，关闭 `nodeIntegration`。页面通过 `src/platform` 使用系统能力，只有桌面适配器访问 `window.electronAPI`；页面不直接访问 Node.js 或 `ipcRenderer`。
 - 默认拒绝浏览器权限检查和请求。需要通知、摄像头等能力时，在主进程的 `setPermissionCheckHandler` 和 `setPermissionRequestHandler` 中按具体权限与来源放行，并同步调整相关测试。
-- 新增桌面能力时，在 `src/shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。所有 IPC 接口校验调用方的窗口主页面和 URL；`getTheme` / `setTheme` 读取与保存主题，主进程只接受 `system`、`light`、`dark` 三种值。其他用户输入或外部数据按实际需要添加运行时校验。
+- 新增桌面能力时，在 `shared/ipc.ts` 定义接口，在主进程注册处理器，并通过 preload 暴露具体方法。所有 IPC 接口校验调用方的窗口主页面和 URL；`getTheme` / `setTheme` 读取与保存主题，主进程只接受 `system`、`light`、`dark` 三种值。其他用户输入或外部数据按实际需要添加运行时校验。
 - 新增实际设置时，在 `settings.ts` 的 `AppSettings` 和 Schema 中添加字段及默认值，通过对应的具体 IPC 接口更新；不向页面开放任意文件路径或任意键值写入，也不在 preload 或渲染进程导入 `electron-store`。
 - HTML 的 CSP 由 Vite 插件按环境注入：开发时允许 React Fast Refresh、样式热更新和本地 WebSocket；编译产物使用更严格的策略。
 - 提交前运行 `npm run check` 和 `npm run test:smoke`（已包含 build）。依赖使用 npm 管理，并提交 `package-lock.json`；`out/` 和类型检查缓存不入库。

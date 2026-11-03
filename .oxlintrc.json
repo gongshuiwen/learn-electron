@@ -157,7 +157,7 @@
       }
     },
     {
-      "files": ["src/renderer/src/**/*.{ts,tsx}"],
+      "files": ["src/**/*.{ts,tsx}"],
       "rules": {
         "react/rules-of-hooks": "error",
         "react/exhaustive-deps": "warn",

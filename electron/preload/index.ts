@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS } from '../shared/ipc'
-import type { AppInfo, ElectronAPI, NotificationResult, TextFile, ThemeSource } from '../shared/ipc'
+import { IPC_CHANNELS } from '../../shared/ipc'
+import type { ElectronAPI } from '../../shared/ipc'
+import type { AppInfo, NotificationResult, TextFile, ThemeSource } from '../../shared/types'
 
 const api: ElectronAPI = {
   // The main-process handler returns AppInfo; Electron's invoke API itself is untyped.

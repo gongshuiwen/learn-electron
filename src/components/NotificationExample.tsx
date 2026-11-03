@@ -1,17 +1,18 @@
+import { platform } from '@/platform'
+import type { PlatformNotificationResult } from '@/platform/contracts'
 import { useState } from 'react'
 import { Bell } from 'lucide-react'
-import type { NotificationResult } from '../../../shared/ipc'
 import { Button } from '@/components/ui/button'
 
 export function NotificationExample() {
-  const [status, setStatus] = useState<NotificationResult | 'idle' | 'sending' | 'error'>('idle')
+  const [status, setStatus] = useState<PlatformNotificationResult | 'idle' | 'sending' | 'error'>(
+    'idle',
+  )
 
   async function sendNotification(): Promise<void> {
     setStatus('sending')
     try {
-      setStatus(
-        await window.electronAPI.showNotification('系统通知', '这是一条示例通知，点击可返回应用。'),
-      )
+      setStatus(await platform.showNotification('系统通知', '这是一条示例通知，点击可返回应用。'))
     } catch {
       setStatus('error')
     }
@@ -40,6 +41,7 @@ export function NotificationExample() {
       ) : null}
       <p role="status" className="mt-3 text-sm text-stone-500 dark:text-stone-400">
         {status === 'sent' ? '通知已交给系统，展示方式由系统通知设置决定。' : null}
+        {status === 'denied' ? '通知权限未获允许，请在浏览器设置中开启。' : null}
         {status === 'unsupported' ? '当前系统不支持通知。' : null}
       </p>
     </section>

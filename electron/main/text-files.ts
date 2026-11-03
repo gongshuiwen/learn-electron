@@ -2,7 +2,7 @@ import { readFile, stat, writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { dialog, shell } from 'electron'
 import type { BrowserWindow } from 'electron'
-import type { TextFile } from '../shared/ipc'
+import type { TextFile } from '../../shared/types'
 
 const MAX_TEXT_BYTES = 1024 * 1024
 const filters = [{ name: '文本文件', extensions: ['txt', 'md', 'json'] }]

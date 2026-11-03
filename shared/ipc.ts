@@ -1,3 +1,5 @@
+import type { AppInfo, NotificationResult, TextFile, ThemeSource } from './types'
+
 export const IPC_CHANNELS = {
   getAppInfo: 'app:get-info',
   copyDiagnostics: 'app:copy-diagnostics',
@@ -9,23 +11,6 @@ export const IPC_CHANNELS = {
   showSavedFile: 'file:show-saved',
 } as const
 
-export type ThemeSource = 'system' | 'light' | 'dark'
-export type NotificationResult = 'sent' | 'unsupported'
-
-export function isThemeSource(value: unknown): value is ThemeSource {
-  return value === 'system' || value === 'light' || value === 'dark'
-}
-
-export interface AppInfo {
-  name: string
-  version: string
-  electron: string
-  chrome: string
-  node: string
-  os: string
-  arch: string
-}
-
 export interface ElectronAPI {
   getAppInfo: () => Promise<AppInfo>
   copyDiagnostics: () => Promise<void>
@@ -35,9 +20,4 @@ export interface ElectronAPI {
   openTextFile: (hasUnsavedChanges: boolean, droppedFile?: File) => Promise<TextFile | null>
   saveTextFile: (content: string) => Promise<string | null>
   showSavedFile: () => Promise<void>
-}
-
-export interface TextFile {
-  name: string
-  content: string
 }

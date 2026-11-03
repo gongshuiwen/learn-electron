@@ -1,10 +1,11 @@
+import { platform } from '@/platform'
 import { useState } from 'react'
 import { Copy } from 'lucide-react'
-import type { AppInfo } from '../../../shared/ipc'
+import type { ApplicationInfo } from '@/platform/contracts'
 import { Button } from '@/components/ui/button'
 
 interface RuntimeInfoProps {
-  info: AppInfo
+  info: ApplicationInfo
 }
 
 export function RuntimeInfo({ info }: RuntimeInfoProps) {
@@ -21,7 +22,7 @@ export function RuntimeInfo({ info }: RuntimeInfoProps) {
   async function copyDiagnostics(): Promise<void> {
     setStatus('copying')
     try {
-      await window.electronAPI.copyDiagnostics()
+      await platform.copyDiagnostics()
       setStatus('copied')
     } catch {
       setStatus('error')
@@ -31,12 +32,14 @@ export function RuntimeInfo({ info }: RuntimeInfoProps) {
   return (
     <div>
       <dl className="space-y-2 border-t border-stone-100 dark:border-stone-800 pt-4 text-xs">
-        {entries.map(([label, value]) => (
-          <div key={label} className="flex flex-wrap justify-between gap-2">
-            <dt className="text-stone-500 dark:text-stone-400">{label}</dt>
-            <dd className="font-mono text-stone-700 dark:text-stone-300">{value}</dd>
-          </div>
-        ))}
+        {entries
+          .filter(([, value]) => value !== undefined)
+          .map(([label, value]) => (
+            <div key={label} className="flex flex-wrap justify-between gap-2">
+              <dt className="text-stone-500 dark:text-stone-400">{label}</dt>
+              <dd className="font-mono text-stone-700 dark:text-stone-300">{value}</dd>
+            </div>
+          ))}
       </dl>
       <Button
         variant="outline"

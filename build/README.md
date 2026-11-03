@@ -30,6 +30,6 @@ SVG 是可编辑源文件，PNG 为 512 × 512 px；ICO 包含 16、24、32、48
 
 16、24 px ICO 图层将圆环中心线半径增至 32 个源坐标单位，保持圆心、线宽和轴线不变，并同步调整圆周连接点，避免缩小后圆孔闭合。其他尺寸使用标准几何；每个 ICO 图层按目标尺寸直接渲染，不从单张 PNG 连续缩放。
 
-`src/main/index.ts` 使用 `icon.ico` 作为 Windows 窗口图标，其他平台使用 `icon.png`；`electron-builder.yml` 使用 `icon.ico` 作为 Windows 打包图标。
+`electron/main/index.ts` 使用 `icon.ico` 作为 Windows 窗口图标，其他平台使用 `icon.png`；`electron-builder.yml` 使用 `icon.ico` 作为 Windows 打包图标。
 
 修改造型时，应同步更新默认图标、两个配色变体及设计资料，并检查小尺寸 ICO 图层。切换配色时，将对应的 SVG、PNG、ICO 一并复制为 `icon.svg`、`icon.png`、`icon.ico`。

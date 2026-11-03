@@ -1,5 +1,5 @@
 import Store from 'electron-store'
-import type { ThemeSource } from '../shared/ipc'
+import type { ThemeSource } from '../../shared/types'
 
 interface AppSettings {
   theme: ThemeSource

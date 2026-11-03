@@ -1,51 +1,31 @@
-import tailwindcss from '@tailwindcss/vite'
-import react from '@vitejs/plugin-react'
 import { defineConfig } from 'electron-vite'
-import type { Plugin } from 'vite'
 import { fileURLToPath } from 'node:url'
-
-function contentSecurityPolicy(): Plugin {
-  return {
-    name: 'renderer-content-security-policy',
-    transformIndexHtml(html, context) {
-      // React Fast Refresh and Vite's CSS updates need inline content in development.
-      const development = Boolean(context.server)
-      const policy = [
-        "default-src 'self'",
-        `script-src 'self'${development ? " 'unsafe-inline'" : ''}`,
-        `style-src 'self'${development ? " 'unsafe-inline'" : ''}`,
-        `connect-src 'self'${development ? ' ws://localhost:* ws://127.0.0.1:*' : ''}`,
-        "img-src 'self' data:",
-        "object-src 'none'",
-        "base-uri 'self'",
-        "form-action 'none'",
-        "frame-src 'none'",
-      ].join('; ')
-
-      return html.replace('__CSP__', policy)
-    },
-  }
-}
+import { mergeConfig } from 'vite'
+import { rendererConfig } from './renderer.config.ts'
 
 export default defineConfig(({ command }) => ({
   main: {
-    build: { sourcemap: command === 'serve' ? 'inline' : false },
+    build: {
+      sourcemap: command === 'serve' ? 'inline' : false,
+      rolldownOptions: {
+        input: fileURLToPath(new URL('./electron/main/index.ts', import.meta.url)),
+      },
+    },
   },
   preload: {
     build: {
       sourcemap: command === 'serve' ? 'inline' : false,
       // Sandboxed preload scripts must use CommonJS, even when the main process is ESM.
       rolldownOptions: {
+        input: fileURLToPath(new URL('./electron/preload/index.ts', import.meta.url)),
         output: { format: 'cjs', entryFileNames: 'index.cjs' },
       },
     },
   },
-  renderer: {
-    resolve: {
-      alias: { '@': fileURLToPath(new URL('./src/renderer/src', import.meta.url)) },
+  renderer: mergeConfig(rendererConfig(), {
+    root: '.',
+    build: {
+      rolldownOptions: { input: fileURLToPath(new URL('./index.html', import.meta.url)) },
     },
-    plugins: [react(), tailwindcss(), contentSecurityPolicy()],
-    server: { host: '127.0.0.1' },
-    build: { minify: true },
-  },
+  }),
 }))

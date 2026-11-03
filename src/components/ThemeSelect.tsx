@@ -1,7 +1,8 @@
+import { platform } from '@/platform'
 import { useEffect, useState } from 'react'
 import { SunMoon } from 'lucide-react'
-import { isThemeSource } from '../../../shared/ipc'
-import type { ThemeSource } from '../../../shared/ipc'
+import { isThemeSource } from '../../shared/types'
+import type { ThemeSource } from '../../shared/types'
 
 export function ThemeSelect() {
   const [source, setSource] = useState<ThemeSource>('system')
@@ -10,7 +11,7 @@ export function ThemeSelect() {
 
   useEffect(() => {
     let active = true
-    void window.electronAPI.getTheme().then(
+    void platform.getTheme().then(
       (theme) => {
         if (active) {
           setSource(theme)
@@ -34,7 +35,7 @@ export function ThemeSelect() {
     setPending(true)
     setError(null)
     try {
-      setSource(await window.electronAPI.setTheme(value))
+      setSource(await platform.setTheme(value))
     } catch {
       setError('主题设置未能保存，请重试。')
     } finally {

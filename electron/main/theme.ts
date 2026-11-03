@@ -1,6 +1,6 @@
 import { nativeTheme } from 'electron'
-import { isThemeSource } from '../shared/ipc'
-import type { ThemeSource } from '../shared/ipc'
+import { isThemeSource } from '../../shared/types'
+import type { ThemeSource } from '../../shared/types'
 import { getSettingsStore } from './settings'
 
 export function setTheme(value: unknown): ThemeSource {
