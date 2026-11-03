@@ -5,6 +5,7 @@ node_modules/
 out/
 dist/
 .cache/
+.data/
 *.tsbuildinfo
 electron.vite.config.*.timestamp-*
 

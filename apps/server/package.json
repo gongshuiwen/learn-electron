@@ -1,0 +1,22 @@
+{
+  "name": "@learn-electron/server",
+  "private": true,
+  "type": "module",
+  "exports": "./src/server.ts",
+  "scripts": {
+    "dev": "npm run dev:server --prefix ../..",
+    "start": "npm run start:server --prefix ../..",
+    "build": "npm run build:server --prefix ../..",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pretest": "npm run typecheck",
+    "test": "node --import tsx --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@learn-electron/contracts": "*",
+    "@learn-electron/agent-runtime": "*",
+    "proper-lockfile": "4.1.2"
+  },
+  "devDependencies": {
+    "@types/proper-lockfile": "4.1.4"
+  }
+}

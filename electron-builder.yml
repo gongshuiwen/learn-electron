@@ -7,6 +7,14 @@ files:
   - out/preload/**
   - out/renderer/**
   - LICENSE
+extraResources:
+  - from: out/runtime
+    to: runtime
+  - from: out/server
+    to: server
+  # The copy filter skips a source root's node_modules, so map it explicitly.
+  - from: out/server/node_modules
+    to: server/node_modules
 win:
   icon: build/icon.ico
   target: nsis

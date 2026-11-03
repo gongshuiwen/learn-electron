@@ -1,0 +1,23 @@
+{
+  "name": "@learn-electron/web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run dev:web --prefix ../..",
+    "build": "npm run build:web --prefix ../..",
+    "typecheck": "tsc --noEmit -p ../../tsconfig.web.json",
+    "pretest": "npm run build",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@learn-electron/contracts": "*",
+    "class-variance-authority": "^0.7.1",
+    "cn": "^0.5.0",
+    "lucide-react": "^1.63.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
+  }
+}

@@ -1,11 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["./apps/web/src/*"] },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "jsx": "react-jsx",
     "tsBuildInfoFile": "./node_modules/.cache/tsconfig.web.tsbuildinfo"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "shared/**/*.ts"]
+  "include": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx", "packages/contracts/src/**/*.ts"]
 }

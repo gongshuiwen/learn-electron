@@ -77,6 +77,136 @@
   },
   "overrides": [
     {
+      "files": ["apps/web/src/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "node:*",
+                  "electron",
+                  "electron/*",
+                  "@earendil-works/*",
+                  "@learn-electron/server",
+                  "@learn-electron/agent-runtime",
+                  "@learn-electron/desktop",
+                  "**/apps/**",
+                  "**/packages/**"
+                ],
+                "message": "Web 只依赖公开契约和前端能力；通过包名使用共享代码。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/server/src/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "electron",
+                  "electron/*",
+                  "react",
+                  "react-dom",
+                  "react-dom/*",
+                  "@earendil-works/*",
+                  "@learn-electron/web",
+                  "@learn-electron/desktop",
+                  "**/apps/**",
+                  "**/packages/**"
+                ],
+                "message": "后端通过 agent-runtime 使用引擎，通过包名依赖公开契约。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/desktop/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "react",
+                  "react-dom",
+                  "react-dom/*",
+                  "@earendil-works/*",
+                  "@learn-electron/server",
+                  "@learn-electron/agent-runtime",
+                  "@learn-electron/web",
+                  "**/apps/**",
+                  "**/packages/**"
+                ],
+                "message": "桌面宿主只集成原生能力及后端进程，不导入前后端业务实现。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/agent-runtime/src/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "electron",
+                  "electron/*",
+                  "react",
+                  "react-dom",
+                  "react-dom/*",
+                  "@learn-electron/*",
+                  "**/apps/**",
+                  "**/contracts/**"
+                ],
+                "message": "Agent Runtime 不依赖应用、UI 或传输协议。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/contracts/src/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "node:*",
+                  "electron",
+                  "electron/*",
+                  "react",
+                  "react-dom",
+                  "react-dom/*",
+                  "@earendil-works/*",
+                  "@learn-electron/*",
+                  "**/apps/**"
+                ],
+                "message": "契约保持为纯 TypeScript 类型和校验，不依赖运行时实现。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["**/*.{ts,tsx}"],
       "rules": {
         "constructor-super": "off",
@@ -150,14 +280,15 @@
       "plugins": ["typescript"]
     },
     {
-      "files": ["tests/**/*.mjs"],
+      "files": ["apps/*/test/**/*.mjs", "packages/*/test/**/*.mjs", "scripts/**/*.mjs"],
+      "env": { "node": true },
       "globals": {
         "process": "readonly",
         "window": "readonly"
       }
     },
     {
-      "files": ["src/**/*.{ts,tsx}"],
+      "files": ["apps/web/src/**/*.{ts,tsx}"],
       "rules": {
         "react/rules-of-hooks": "error",
         "react/exhaustive-deps": "warn",

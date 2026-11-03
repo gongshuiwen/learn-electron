@@ -1,0 +1,22 @@
+{
+  "name": "@learn-electron/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run dev --prefix ../..",
+    "build": "npm run build --prefix ../..",
+    "pretest": "npm run build && install-electron",
+    "test": "node --test --test-concurrency=1 test/smoke.test.mjs test/integration/*.test.mjs",
+    "pretest:smoke": "npm run pretest",
+    "test:smoke": "node --test test/smoke.test.mjs",
+    "pretest:packaged": "npm run pack --prefix ../..",
+    "test:packaged": "node --test test/packaged.test.mjs"
+  },
+  "dependencies": {
+    "@learn-electron/contracts": "*",
+    "electron-log": "^5.4.4",
+    "electron-store": "^12.0.0",
+    "electron-updater": "^6.8.11"
+  }
+}

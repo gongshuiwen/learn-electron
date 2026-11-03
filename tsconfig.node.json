@@ -8,9 +8,8 @@
   },
   "include": [
     "electron.vite.config.ts",
-    "electron/main/**/*.ts",
-    "electron/preload/**/*.ts",
-    "shared/**/*.ts",
+    "apps/desktop/**/*.ts",
+    "packages/contracts/src/native.ts",
     "renderer.config.ts",
     "vite.web.config.ts"
   ]
