@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { API_VERSION, isActiveRun } from '@learn-electron/contracts'
+import {
+  isActiveRun,
+  parseConversation,
+  parseConversations,
+  parseConversationSnapshot,
+  parseRun,
+  parseServiceMeta,
+} from '@learn-electron/contracts'
 import type {
   Conversation,
   ConversationSnapshot,
-  Run,
   RunEvent,
   ServiceMeta,
 } from '@learn-electron/contracts'
-import { readRunEvents, reconnectDelay, request, StreamProtocolError } from './api'
+import { ApiRequestError, ProtocolError, readRunEvents, reconnectDelay, request } from './api'
 
 const selectionKey = 'learn-electron.chat.selection.v1'
 
@@ -109,15 +115,11 @@ export function useChat() {
     alive.current = true
     const controller = new AbortController()
     void Promise.all([
-      request<ServiceMeta>('/meta', { signal: controller.signal }),
-      request<Conversation[]>('/conversations', { signal: controller.signal }),
+      request('/meta', parseServiceMeta, { signal: controller.signal }),
+      request('/conversations', parseConversations, { signal: controller.signal }),
     ])
       .then(([service, list]) => {
         if (controller.signal.aborted) return
-        if (service.apiVersion !== API_VERSION) {
-          setMeta(null)
-          throw new Error(`服务端 API 版本不兼容，需要 v${String(API_VERSION)}，请同步升级前后端。`)
-        }
         setMeta(service)
         setConversations(list)
         const remembered = savedSelection()
@@ -127,6 +129,7 @@ export function useChat() {
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) {
+          setMeta(null)
           setError(errorMessage(cause))
           setLoading(false)
         }
@@ -141,7 +144,7 @@ export function useChat() {
     if (!selectedId) return
     const controller = new AbortController()
     loadController.current = controller
-    void request<ConversationSnapshot>(`/conversations/${encodeURIComponent(selectedId)}`, {
+    void request(`/conversations/${encodeURIComponent(selectedId)}`, parseConversationSnapshot, {
       signal: controller.signal,
     })
       .then((detail) => {
@@ -182,7 +185,10 @@ export function useChat() {
           }
         } catch (cause) {
           if (controller.signal.aborted) return
-          if (cause instanceof StreamProtocolError) {
+          if (
+            cause instanceof ProtocolError ||
+            (cause instanceof ApiRequestError && !cause.retryable)
+          ) {
             setConnection('idle')
             setError(cause.message)
             return
@@ -201,7 +207,7 @@ export function useChat() {
     setPending(true)
     setError(null)
     try {
-      const conversation = await request<Conversation>('/conversations', {
+      const conversation = await request('/conversations', parseConversation, {
         method: 'POST',
         body: '{}',
       })
@@ -223,7 +229,7 @@ export function useChat() {
     let id = selectedRef.current
     try {
       if (!id) {
-        const conversation = await request<Conversation>('/conversations', {
+        const conversation = await request('/conversations', parseConversation, {
           method: 'POST',
           body: '{}',
         })
@@ -239,11 +245,14 @@ export function useChat() {
           ? submission.current
           : { conversationId: id, message: text, requestId: crypto.randomUUID() }
       submission.current = attempt
-      const run = await request<Run>(`/conversations/${encodeURIComponent(id)}/runs`, {
+      const run = await request(`/conversations/${encodeURIComponent(id)}/runs`, parseRun, {
         method: 'POST',
         body: JSON.stringify({ message: text, requestId: attempt.requestId }),
       })
-      const detail = await request<ConversationSnapshot>(`/conversations/${encodeURIComponent(id)}`)
+      const detail = await request(
+        `/conversations/${encodeURIComponent(id)}`,
+        parseConversationSnapshot,
+      )
       if (submission.current === attempt) submission.current = null
       if (!alive.current) return true
       if (selectedRef.current === id) {
@@ -268,11 +277,12 @@ export function useChat() {
     if (!runId || !active) return
     setPending(true)
     try {
-      const run = await request<Run>(`/runs/${encodeURIComponent(runId)}/cancel`, {
+      const run = await request(`/runs/${encodeURIComponent(runId)}/cancel`, parseRun, {
         method: 'POST',
       })
-      const detail = await request<ConversationSnapshot>(
+      const detail = await request(
         `/conversations/${encodeURIComponent(run.conversationId)}`,
+        parseConversationSnapshot,
       )
       if (alive.current && selectedRef.current === run.conversationId) setSnapshot(detail)
     } catch (cause) {
@@ -287,10 +297,11 @@ export function useChat() {
     if (!id || !title.trim()) return false
     setPending(true)
     try {
-      const conversation = await request<Conversation>(`/conversations/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ title }),
-      })
+      const conversation = await request(
+        `/conversations/${encodeURIComponent(id)}`,
+        parseConversation,
+        { method: 'PATCH', body: JSON.stringify({ title }) },
+      )
       if (!alive.current) return true
       setConversations((list) => updateConversation(list, conversation))
       setSnapshot((current) =>
@@ -310,7 +321,7 @@ export function useChat() {
     if (!id) return false
     setPending(true)
     try {
-      await request<void>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      await request(`/conversations/${encodeURIComponent(id)}`, undefined, { method: 'DELETE' })
       if (!alive.current) return true
       const remaining = conversations.filter((item) => item.id !== id)
       setConversations(remaining)

@@ -98,6 +98,16 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isConversation(value: unknown): value is Conversation {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.title === 'string' &&
+    typeof value.createdAt === 'string' &&
+    typeof value.updatedAt === 'string'
+  )
+}
+
 function isMessage(value: unknown): value is Message {
   return (
     isRecord(value) &&
@@ -128,18 +138,63 @@ function isRun(value: unknown): value is Run {
 function isSnapshot(value: unknown): value is ConversationSnapshot {
   return (
     isRecord(value) &&
-    isRecord(value.conversation) &&
-    typeof value.conversation.id === 'string' &&
-    typeof value.conversation.title === 'string' &&
-    typeof value.conversation.createdAt === 'string' &&
-    typeof value.conversation.updatedAt === 'string' &&
+    isConversation(value.conversation) &&
     Array.isArray(value.messages) &&
     value.messages.every(isMessage) &&
-    (value.run === null || isRun(value.run)) &&
+    (value.run === null ||
+      (isRun(value.run) && value.run.conversationId === value.conversation.id)) &&
     typeof value.sequence === 'number' &&
     Number.isSafeInteger(value.sequence) &&
     value.sequence >= 0
   )
+}
+
+export function parseServiceMeta(value: unknown): ServiceMeta {
+  if (isRecord(value) && typeof value.apiVersion === 'number' && value.apiVersion !== API_VERSION) {
+    throw new Error(`服务端 API 版本不兼容，需要 v${String(API_VERSION)}，请同步升级前后端。`)
+  }
+  if (
+    !isRecord(value) ||
+    value.apiVersion !== API_VERSION ||
+    (value.engine !== 'pi' && value.engine !== 'mock') ||
+    !isRecord(value.model) ||
+    typeof value.model.provider !== 'string' ||
+    typeof value.model.id !== 'string' ||
+    typeof value.configured !== 'boolean' ||
+    !isRecord(value.capabilities) ||
+    typeof value.capabilities.tools !== 'boolean'
+  ) {
+    throw new Error('服务端元信息格式不兼容，请刷新页面。')
+  }
+  return {
+    apiVersion: API_VERSION,
+    engine: value.engine,
+    model: { provider: value.model.provider, id: value.model.id },
+    configured: value.configured,
+    capabilities: { tools: value.capabilities.tools },
+  }
+}
+
+export function parseConversation(value: unknown): Conversation {
+  if (!isConversation(value)) throw new Error('服务端会话格式不兼容，请刷新页面。')
+  return value
+}
+
+export function parseConversations(value: unknown): Conversation[] {
+  if (!Array.isArray(value) || !value.every(isConversation)) {
+    throw new Error('服务端会话列表格式不兼容，请刷新页面。')
+  }
+  return value
+}
+
+export function parseRun(value: unknown): Run {
+  if (!isRun(value)) throw new Error('服务端任务格式不兼容，请刷新页面。')
+  return value
+}
+
+export function parseConversationSnapshot(value: unknown): ConversationSnapshot {
+  if (!isSnapshot(value)) throw new Error('服务端会话快照格式不兼容，请刷新页面。')
+  return value
 }
 
 export function parseRunEvent(value: unknown): RunEvent {
@@ -164,7 +219,6 @@ export function parseRunEvent(value: unknown): RunEvent {
     value.type === 'snapshot' &&
     isSnapshot(value.snapshot) &&
     value.snapshot.conversation.id === base.conversationId &&
-    (!value.snapshot.run || value.snapshot.run.conversationId === base.conversationId) &&
     value.snapshot.sequence === base.sequence
   ) {
     // An old run's snapshot can contain the conversation's newer current run.

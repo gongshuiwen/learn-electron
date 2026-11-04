@@ -161,6 +161,11 @@ export function fakeApi() {
           return json(snapshot.run)
         }
         eventReads++
+        if (behavior === 'event-errors') {
+          return eventReads === 1
+            ? json({ error: { code: 'shutting_down', message: '服务正在停止' } }, 503)
+            : json({ error: { code: 'run_not_found', message: '任务不存在' } }, 404)
+        }
         const initial = event(snapshot, { type: 'snapshot', snapshot: clone(snapshot) })
         if (behavior === 'incompatible-events') {
           return route.fulfill({

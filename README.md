@@ -97,6 +97,7 @@ npm run build
 
 ```text
 apps/web/test/web.test.mjs
+apps/web/test/api.test.mjs
 apps/server/test/server.test.mjs
 apps/server/test/chat-service.test.mjs
 apps/server/test/store.test.mjs
@@ -122,9 +123,9 @@ npm run test:packaged --workspace @learn-electron/desktop
 
 根目录 `npm test` 聚合所有提供 `test` 命令的工作区。`test:web`、`test:server`、`test:contracts`、`test:runtime`、`test:desktop` 均委托对应工作区；`test:smoke` 只运行桌面启动与聊天链路。CI 执行完整桌面集成测试；安装包验证不在常规 `npm test` 或 CI 中，发布前需在 Windows 显式运行 `npm run test:packaged`。`npm run check` 执行全仓库静态检查。
 
-后端 HTTP 测试使用真实 HTTP/SSE、SQLite 和可注入假引擎验证鉴权、CRUD、幂等、取消和恢复；存储测试专门验证事务回滚，入口测试验证环境加载和进程启停。它们直接加载本包源码并执行类型检查，不依赖桌面产物。`contracts` 通过纯函数测试验证请求边界、事件格式和标识一致性。Pi 适配测试使用 SDK 自带的离线 provider，运行真实 session、事件与上下文持久化，验证文本转换、会话续接、取消、失败和资源清理。
+后端 HTTP 测试使用真实 HTTP/SSE、SQLite 和可注入假引擎验证鉴权、CRUD、幂等、取消和恢复；存储测试专门验证事务回滚，入口测试验证环境加载和进程启停。它们直接加载本包源码并执行类型检查，不依赖桌面产物。`contracts` 通过纯函数测试验证请求与响应边界、事件格式和标识一致性。Pi 适配测试使用 SDK 自带的离线 provider，运行真实 session、事件与上下文持久化，验证文本转换、会话续接、取消、失败和资源清理。
 
-Web 测试构建前端，使用 Playwright 和本机 Chrome 验证生产界面与模拟 API；可用 `PLAYWRIGHT_CHANNEL=msedge` 切换 Edge。各场景独立创建浏览器 context 和假服务状态，分别验证会话与渲染、流恢复、请求重试、导航竞态、主题和兼容性提示。假服务只通过显式重命名请求修改标题。
+Web 的传输测试验证大快照分块读取、响应校验接入和错误读取。界面测试构建前端，使用 Playwright 和本机 Chrome 验证生产界面与模拟 API；可用 `PLAYWRIGHT_CHANNEL=msedge` 切换 Edge。各场景独立创建浏览器 context 和假服务状态，分别验证会话与渲染、流恢复、请求重试、导航竞态、主题和兼容性提示。假服务只通过显式重命名请求修改标题。
 
 桌面测试通过 `pretest` 准备前端、后端和 Electron，按原生集成、生命周期、窗口状态和主题组织；每个场景使用独立 profile，文件串行执行。薄 smoke 使用明确的 mock 引擎验证桌面与本地服务链路。Windows `test:packaged` 通过 `pretest:packaged` 准备交付物，并复制到仓库外，验证无系统 Node 的运行、历史恢复、后台进程清理，以及生产 Pi 依赖的离线加载。自动化测试不需要真实模型密钥；真实提供商网络连接不在这些离线测试的覆盖范围内。
 

@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { API_VERSION, parseRunEvent, parseStartRun, parseTitle } from '../src/index.ts'
+import {
+  API_VERSION,
+  parseConversation,
+  parseConversations,
+  parseConversationSnapshot,
+  parseRun,
+  parseRunEvent,
+  parseServiceMeta,
+  parseStartRun,
+  parseTitle,
+} from '../src/index.ts'
 
 const timestamp = '2026-01-01T00:00:00.000Z'
 const conversation = {
@@ -67,6 +77,41 @@ test('titles are trimmed and must fit the public length limit', () => {
   for (const body of [null, [], {}, { title: 1 }, { title: '  ' }, { title: 'x'.repeat(101) }]) {
     assert.throws(() => parseTitle(body), Error)
   }
+})
+
+test('service metadata validates its version, model and capabilities', () => {
+  const meta = {
+    apiVersion: API_VERSION,
+    engine: 'pi',
+    model: { provider: 'test', id: 'model' },
+    configured: false,
+    capabilities: { tools: false },
+  }
+  assert.deepEqual(parseServiceMeta(meta), meta)
+  assert.throws(() => parseServiceMeta({ ...meta, apiVersion: API_VERSION + 1 }), /API 版本不兼容/)
+  for (const value of [
+    null,
+    { ...meta, engine: 'unknown' },
+    { ...meta, model: { provider: 'test' } },
+    { ...meta, configured: 'false' },
+    { ...meta, capabilities: { tools: 0 } },
+  ]) {
+    assert.throws(() => parseServiceMeta(value), /格式不兼容/)
+  }
+})
+
+test('HTTP responses validate conversations, lists, runs and snapshots', () => {
+  for (const [parse, valid, invalid] of [
+    [parseConversation, conversation, { ...conversation, title: null }],
+    [parseConversations, [conversation], [conversation, {}]],
+    [parseRun, run, { ...run, status: 'unknown' }],
+    [parseConversationSnapshot, snapshot, { ...snapshot, messages: [{}] }],
+  ]) {
+    assert.deepEqual(parse(valid), valid)
+    assert.throws(() => parse(invalid), /格式不兼容/)
+    assert.throws(() => parse(null), /格式不兼容/)
+  }
+  assert.deepEqual(parseConversations([]), [])
 })
 
 test('each public stream event preserves its required fields', () => {

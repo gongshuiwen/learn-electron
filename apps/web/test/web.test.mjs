@@ -245,7 +245,7 @@ test(
   },
 )
 
-for (const behavior of ['incompatible-events', 'invalid-payload']) {
+for (const behavior of ['incompatible-events', 'invalid-payload', 'event-errors']) {
   test(
     `Web reports ${behavior} and resumes the same run only after retry`,
     { timeout: 30_000 },
@@ -258,11 +258,12 @@ for (const behavior of ['incompatible-events', 'invalid-payload']) {
       await send(page, `校验回复流 ${behavior}`)
       await page
         .getByRole('alert')
-        .filter({ hasText: /服务端事件.*不兼容/ })
+        .filter({ hasText: /服务端事件.*不兼容|任务不存在/ })
         .waitFor()
       // Exceed the initial reconnect delay to catch an unintended retry loop.
       await page.waitForTimeout(1100)
-      assert.equal(api.eventReads, 1)
+      const attempts = behavior === 'event-errors' ? 2 : 1
+      assert.equal(api.eventReads, attempts)
       const streamUrl = streamUrls[0]
 
       api.setBehavior('complete')
@@ -272,7 +273,7 @@ for (const behavior of ['incompatible-events', 'invalid-payload']) {
         .getByText('你好', { exact: true })
         .waitFor()
       await page.getByRole('button', { name: '发送消息', exact: true }).waitFor()
-      assert.deepEqual(streamUrls, [streamUrl, streamUrl])
+      assert.deepEqual(streamUrls, Array(attempts + 1).fill(streamUrl))
       assert.equal(api.runCount, 1)
     },
   )
