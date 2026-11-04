@@ -83,7 +83,7 @@ npm run build
 - `build` 组合检查并生成桌面产物，前端输出 `out/renderer`。
 - 后端构建对 Pi 保留外部依赖，独立部署需同时提供其生产依赖。
 
-也可以使用 `npm run dev -w @learn-electron/web`、`npm run dev -w @learn-electron/server`，以及各工作区的 build/typecheck/test 命令。根脚本负责构建工具配置，业务源码保持在对应工作区。
+也可以使用 `npm run dev -w @learn-electron/web`、`npm run dev -w @learn-electron/server`，以及各工作区提供的命令。根脚本负责构建工具配置，业务源码保持在对应工作区。
 
 ## 协议与恢复
 
