@@ -45,11 +45,13 @@ npm run dev:server
 npm run dev:web
 ```
 
-后端默认监听 `127.0.0.1:4318`。Vite 将 `/api` 转发给后端，在服务端注入 `.env` 中的访问令牌，令牌和模型 API key 都不会进入前端构建。`APP_SERVER_URL` 可覆盖代理目标。
+后端默认监听 `127.0.0.1:4318`。Vite 将 `/api` 转发给后端，在服务端注入 `.env` 中的访问令牌，令牌和模型 API key 都不会进入前端构建。修改 `APP_PORT` 时，需同步设置 `APP_SERVER_URL` 指向新的后端地址。
 
-首次验证可将 `.env` 的 `APP_ENGINE` 改为 `mock`：这是明确标识的离线演示，不会自动替代配置错误的真实模型。
+离线演示可设置 `APP_ENGINE=mock`，即使配置了真实密钥，也只返回模拟回复；真实引擎失败时不会自动切换到 mock。
 
 真实 Pi 模式使用 `APP_ENGINE=pi`。以 DeepSeek 为例配置 `PI_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`，`PI_MODEL` 可填写 Pi 模型目录中的 ID；留空时选择该提供商有凭据的可用模型。其他提供商使用 Pi 对应的环境变量。模型与密钥统一由服务端管理，首版不提供浏览器密钥设置页。
+
+修改 `.env`、模型凭据或引擎模式后，重启对应的 server 或 desktop；访问令牌或代理地址变化时，也需重启 Web 开发服务。源码监听不代表配置热加载。
 
 模型不可用时按界面提示检查服务端配置；隔离与上下文说明见 [数据与配置归属](docs/architecture.md#数据与配置归属)。
 
@@ -59,11 +61,13 @@ npm run dev:web
 npm run dev
 ```
 
-开发桌面读取项目根目录 `.env`；安装版本只继承启动环境。开发需要 Node，安装后的应用自带 Node，无需系统 Node 或全局 pi。
+开发桌面读取项目根目录 `.env`；安装版本只继承启动环境，设置 Pi 模型环境变量后再启动。开发需要 Node，安装后的应用自带 Node，无需系统 Node 或全局 pi。
 
 开发时后端源码变化会自动重建并重启应用，界面支持热更新。开发启动不执行类型检查，使用 `npm run check` 或 `npm run build` 验证类型。
 
-设置 Pi 模型环境变量后再启动安装版本。桌面会话保存在 `userData/agent`，与独立后端的 `.data/` 分开，不自动同步。运行链路与关闭机制见 [整体架构](docs/architecture.md)。
+桌面会话保存在 `userData/agent`，与独立后端的 `.data/` 分开，不自动同步。运行链路与关闭机制见 [整体架构](docs/architecture.md)。
+
+排查启动或运行问题时，独立服务查看终端输出；桌面通过“打开日志目录”菜单查看 `userData/logs/main.log`。
 
 ## 独立构建与工作区命令
 
@@ -116,7 +120,7 @@ npm test --workspace @learn-electron/desktop
 npm run test:packaged --workspace @learn-electron/desktop
 ```
 
-根目录 `npm test` 聚合所有提供 `test` 命令的工作区。`test:web`、`test:server`、`test:contracts`、`test:runtime`、`test:desktop` 均委托对应工作区；`test:smoke` 只运行桌面启动与聊天链路。`test:packaged` 需显式执行，不包含在常规 `npm test` 中。CI 执行完整桌面集成测试。`npm run check` 执行全仓库静态检查。
+根目录 `npm test` 聚合所有提供 `test` 命令的工作区。`test:web`、`test:server`、`test:contracts`、`test:runtime`、`test:desktop` 均委托对应工作区；`test:smoke` 只运行桌面启动与聊天链路。CI 执行完整桌面集成测试；安装包验证不在常规 `npm test` 或 CI 中，发布前需在 Windows 显式运行 `npm run test:packaged`。`npm run check` 执行全仓库静态检查。
 
 后端 HTTP 测试使用真实 HTTP/SSE、SQLite 和可注入假引擎验证鉴权、CRUD、幂等、取消和恢复；存储测试专门验证事务回滚，入口测试验证环境加载和进程启停。它们直接加载本包源码并执行类型检查，不依赖桌面产物。`contracts` 通过纯函数测试验证请求边界、事件格式和标识一致性。Pi 适配测试使用 SDK 自带的离线 provider，运行真实 session、事件与上下文持久化，验证文本转换、会话续接、取消、失败和资源清理。
 
