@@ -4,33 +4,25 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { desktopFixture } from '../helpers/electron.mjs'
 
-test('Window state survives restart and recovers invalid files', { timeout: 60000 }, async (t) => {
-  const { profile, launch: launchDesktop } = await desktopFixture(t, 'window')
-  const stateFile = join(profile, 'window-state.json')
-  let desktop
-  async function launch() {
-    desktop = await launchDesktop()
-    await desktop.firstWindow()
-    await desktop.evaluate(async ({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows()[0]
-      if (!win.isVisible()) await new Promise((resolve) => win.once('show', resolve))
-    })
+async function windowFixture(t) {
+  const { profile, launch } = await desktopFixture(t, 'window')
+  return {
+    stateFile: join(profile, 'window-state.json'),
+    async launch() {
+      const desktop = await launch()
+      await desktop.firstWindow()
+      await desktop.evaluate(async ({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows()[0]
+        if (!win.isVisible()) await new Promise((resolve) => win.once('show', resolve))
+      })
+      return desktop
+    },
   }
+}
 
-  await launch()
-  const edgeStates = await desktop.evaluate(({ screen }) =>
-    screen.getAllDisplays().map(({ workArea: area }) => {
-      const width = Math.min(800, area.width)
-      const height = Math.min(600, area.height)
-      return {
-        x: area.x + area.width - width,
-        y: area.y + area.height - height,
-        width,
-        height,
-        maximized: false,
-      }
-    }),
-  )
+test('Window state survives restart and layout reset', { timeout: 60000 }, async (t) => {
+  const { stateFile, launch } = await windowFixture(t)
+  let desktop = await launch()
   const bounds = await desktop.evaluate(({ BrowserWindow, screen }) => {
     const win = BrowserWindow.getAllWindows()[0]
     const area = screen.getPrimaryDisplay().workArea
@@ -44,7 +36,7 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
   })
   await desktop.close()
   assert.deepEqual(JSON.parse(await readFile(stateFile, 'utf8')), { ...bounds, maximized: false })
-  await launch()
+  desktop = await launch()
   assert.deepEqual(
     await desktop.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].getNormalBounds(),
@@ -97,7 +89,7 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
     ...resetBounds,
     maximized: false,
   })
-  await launch()
+  desktop = await launch()
   assert.deepEqual(
     await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds()),
     resetBounds,
@@ -126,7 +118,7 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
     )
     await desktop.close()
     assert.deepEqual(JSON.parse(await readFile(stateFile, 'utf8')), { ...bounds, maximized: true })
-    await launch()
+    desktop = await launch()
     assert.equal(
       await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized()),
       true,
@@ -152,7 +144,7 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
         }),
     )
     await desktop.close()
-    await launch()
+    desktop = await launch()
     assert.equal(
       await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()),
       false,
@@ -164,6 +156,25 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
       bounds,
     )
   }
+  await desktop.close()
+})
+
+test('Window state recovers invalid files and display bounds', { timeout: 60000 }, async (t) => {
+  const { stateFile, launch } = await windowFixture(t)
+  let desktop = await launch()
+  const edgeStates = await desktop.evaluate(({ screen }) =>
+    screen.getAllDisplays().map(({ workArea: area }) => {
+      const width = Math.min(800, area.width)
+      const height = Math.min(600, area.height)
+      return {
+        x: area.x + area.width - width,
+        y: area.y + area.height - height,
+        width,
+        height,
+        maximized: false,
+      }
+    }),
+  )
   await desktop.close()
 
   for (const contents of [
@@ -179,7 +190,7 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
     }),
   ]) {
     await writeFile(stateFile, contents)
-    await launch()
+    desktop = await launch()
     const { bounds: restored, area } = await desktop.evaluate(({ BrowserWindow, screen }) => {
       const bounds = BrowserWindow.getAllWindows()[0].getNormalBounds()
       return { bounds, area: screen.getDisplayMatching(bounds).workArea }
@@ -200,7 +211,7 @@ test('Window state survives restart and recovers invalid files', { timeout: 6000
   // A corrected size must remain stable instead of shrinking on every restart.
   const savedBounds = JSON.parse(await readFile(stateFile, 'utf8'))
   delete savedBounds.maximized
-  await launch()
+  desktop = await launch()
   assert.deepEqual(
     await desktop.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].getNormalBounds(),

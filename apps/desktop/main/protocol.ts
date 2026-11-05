@@ -56,7 +56,9 @@ export function registerDesktopProtocol(
       headers.delete('host')
       headers.set('Authorization', `Bearer ${backend.token}`)
       try {
-        const response = await fetch(`${backend.url}${url.pathname}${url.search}`, {
+        const backendURL = backend.url
+        if (!backendURL) throw new Error('Local server is unavailable')
+        const response = await fetch(`${backendURL}${url.pathname}${url.search}`, {
           method: request.method,
           headers,
           ...(request.method === 'GET' || request.method === 'HEAD'
@@ -74,7 +76,10 @@ export function registerDesktopProtocol(
         cors.set('Content-Type', 'application/json')
         return new Response(
           JSON.stringify({
-            error: { code: 'SERVICE_UNAVAILABLE', message: '本地服务不可用，请重新启动应用。' },
+            error: {
+              code: 'SERVICE_UNAVAILABLE',
+              message: '本地服务暂不可用，请稍后重试；持续失败时请重新启动应用。',
+            },
           }),
           { status: 503, headers: cors },
         )

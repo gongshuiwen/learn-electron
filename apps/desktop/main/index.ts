@@ -30,7 +30,10 @@ app.on('will-quit', (event) => {
   if (!backend || quitting) return
   event.preventDefault()
   quitting = true
-  void backend.close().finally(() => app.quit())
+  void backend.close().finally(() => {
+    // A dead backend may close immediately; retry outside the current quit event.
+    setImmediate(() => app.quit())
+  })
 })
 
 function isRendererURL(url: string): boolean {

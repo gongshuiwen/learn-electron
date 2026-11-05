@@ -110,12 +110,10 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
         if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
           input.onDelta(event.assistantMessageEvent.delta)
         }
-        if (
-          event.type === 'message_end' &&
-          event.message.role === 'assistant' &&
-          (event.message.stopReason === 'error' || event.message.stopReason === 'aborted')
-        ) {
-          responseFailed = true
+        if (event.type === 'message_end' && event.message.role === 'assistant') {
+          // Context overflow can fail an attempt before compaction recovers it.
+          responseFailed =
+            event.message.stopReason === 'error' || event.message.stopReason === 'aborted'
         }
       })
       const abort = (): void => {

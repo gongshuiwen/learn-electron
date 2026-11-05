@@ -57,7 +57,9 @@ flowchart LR
 
 桌面模式：[backend.ts](../apps/desktop/main/backend.ts) 生成进程间访问令牌，通过 IPC 向 [桌面后端入口](../apps/server/src/desktop-child.ts) 发送启动参数，等待 ready 后创建界面。后端使用随机回环端口和 `userData/agent` 数据目录。
 
-[protocol.ts](../apps/desktop/main/protocol.ts) 提供受限静态资源和 API 转发，并向固定后端注入令牌。[preload](../apps/desktop/preload/index.ts) 只暴露 `apiBaseUrl`、`getTheme()` 和 `setTheme()`；renderer 不接触访问令牌。
+[protocol.ts](../apps/desktop/main/protocol.ts) 提供受限静态资源和 API 转发，并向当前后端注入令牌。[preload](../apps/desktop/preload/index.ts) 只暴露 `apiBaseUrl`、`getTheme()` 和 `setTheme()`；renderer 不接触访问令牌。
+
+后端就绪后意外退出，桌面按 0.5、1.5、4 秒退避，最多尝试恢复三次；连续运行满 60 秒后重置预算。代理在恢复期间返回 `503`，就绪后切换到新地址，不重试原请求。退出应用会取消恢复并回收在途子进程。
 
 开发桌面由主进程读取项目 `.env`；安装版本只继承启动环境。桌面子进程不读取工作目录的 `.env`，两个后端入口共用 [启动与清理逻辑](../apps/server/src/lifecycle.ts)。独立服务与桌面的数据目录分开，不自动同步。
 
@@ -72,6 +74,8 @@ flowchart LR
 | 提供商、模型与凭证                                 | 后端启动环境                      | 前端仅读取引擎元信息与可用状态               |
 
 Pi 使用应用专属的工作目录、设置、内存凭据存储和会话目录，不加载用户全局配置、默认工具、skills 或扩展。已有展示历史而 Pi 原生上下文缺失时，继续生成会失败，需要新建会话。
+
+SQLite 使用 `PRAGMA user_version` 记录结构版本，[migrations.ts](../apps/server/src/migrations.ts) 按顺序追加迁移；已发布的迁移不修改。v1 保留并接管原有未标版本的表。升级现有数据库前，通过 SQLite 生成包含已提交 WAL 数据的一致备份 `app.sqlite.before-v<目标版本>.<随机标识>.bak`；新库不备份。迁移与版本更新在同一事务中提交，失败回滚，拒绝打开高于当前应用支持的版本。备份只包含 SQLite；Pi 原生上下文仍独立保存。
 
 ## 生命周期与资源所有权
 

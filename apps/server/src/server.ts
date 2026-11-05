@@ -33,6 +33,7 @@ const CHAT_ERROR_STATUS: Record<ChatErrorCode, number> = {
   conversation_busy: 409,
   idempotency_conflict: 409,
   engine_not_configured: 503,
+  storage_unavailable: 503,
   shutting_down: 503,
 }
 

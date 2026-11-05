@@ -4,6 +4,7 @@ export type ChatErrorCode =
   | 'conversation_busy'
   | 'idempotency_conflict'
   | 'engine_not_configured'
+  | 'storage_unavailable'
   | 'shutting_down'
 
 export class ChatError extends Error {

@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import electronPath from 'electron'
@@ -271,6 +272,119 @@ test(
     assert.match(log, /exitCode:/)
   },
 )
+test(
+  'Backend recovery avoids replay and preserves the remaining restart budget',
+  { timeout: 90000 },
+  async (t) => {
+    // Startup and both failure phases share one deadline, leaving 15 seconds for cleanup.
+    const deadline = Date.now() + 75000
+    const { profile, launch } = await desktopFixture(t, 'backend-recovery')
+    const desktop = await launch()
+    const page = await desktop.firstWindow()
+    page.setDefaultTimeout(10000)
+    await page.getByText('demo / deterministic', { exact: true }).waitFor()
+    const logFile = join(profile, 'logs/main.log')
+    const firstLog = await readFile(logFile, 'utf8')
+    const firstPid = Number(/Local server ready:\s+(\d+)/.exec(firstLog)?.[1])
+    assert.ok(firstPid > 0)
+    const started = await page.evaluate(async () => {
+      const base = `${window.electronAPI.apiBaseUrl}/api/v1`
+      const conversation = await fetch(`${base}/conversations`, { method: 'POST' }).then((r) =>
+        r.json(),
+      )
+      const response = await fetch(`${base}/conversations/${conversation.id}/runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: 'crash-once', message: '长任务'.repeat(5000) }),
+      })
+      window.backendRecoveryValue = 'preserved'
+      return {
+        conversationId: conversation.id,
+        status: response.status,
+        run: await response.json(),
+      }
+    })
+    assert.equal(started.status, 202)
+    assert.equal(started.run.status, 'running')
+    process.kill(firstPid, 'SIGKILL')
+    let snapshot
+    while (Date.now() < deadline) {
+      snapshot = await page.evaluate(async (id) => {
+        try {
+          const response = await fetch(
+            `${window.electronAPI.apiBaseUrl}/api/v1/conversations/${id}`,
+            { signal: AbortSignal.timeout(2000) },
+          )
+          return response.ok ? response.json() : null
+        } catch {
+          return null
+        }
+      }, started.conversationId)
+      if (snapshot?.run?.status === 'interrupted') break
+      await delay(100)
+    }
+    assert.equal(
+      snapshot?.run?.status,
+      'interrupted',
+      `Backend did not recover before the deadline:\n${await readFile(logFile, 'utf8')}`,
+    )
+    assert.equal(snapshot.run.id, started.run.id)
+    assert.equal(snapshot.messages.length, 2)
+    assert.equal(snapshot.messages[1].status, 'interrupted')
+    assert.equal(await page.evaluate(() => window.backendRecoveryValue), 'preserved')
+    const readyPids = [
+      ...(await readFile(logFile, 'utf8')).matchAll(/Local server ready:\s+(\d+)/g),
+    ]
+    assert.equal(readyPids.length, 2)
+    const recoveredPid = Number(readyPids[1][1])
+    assert.notEqual(recoveredPid, firstPid)
+
+    // The healthy restart consumed one attempt; later startup failures share the remaining budget.
+    await desktop.evaluate(() => {
+      process.env.APP_ENGINE = 'invalid-engine'
+    })
+    process.kill(recoveredPid, 'SIGKILL')
+    let log = ''
+    while (Date.now() < deadline) {
+      log = await readFile(logFile, 'utf8')
+      if (log.includes('Local server restart limit reached')) break
+      await delay(100)
+    }
+    assert.match(log, /Local server restart limit reached/)
+    assert.equal([...log.matchAll(/Restarting local server:/g)].length, 3)
+    assert.equal([...log.matchAll(/Starting local server:/g)].length, 4)
+    assert.equal(
+      await page.evaluate(
+        async () => (await fetch(`${window.electronAPI.apiBaseUrl}/api/v1/meta`)).status,
+      ),
+      503,
+    )
+    for (const [, pid] of log.matchAll(/Starting local server:\s+(\d+)/g)) {
+      assert.throws(() => process.kill(Number(pid), 0), { code: 'ESRCH' })
+    }
+  },
+)
+
+test('Quitting suppresses backend recovery', { timeout: 30000 }, async (t) => {
+  const { profile, launch } = await desktopFixture(t, 'backend-quit')
+  const desktop = await launch()
+  const page = await desktop.firstWindow()
+  await page.getByText('demo / deterministic', { exact: true }).waitFor()
+  const logFile = join(profile, 'logs/main.log')
+  const pid = Number(/Local server ready:\s+(\d+)/.exec(await readFile(logFile, 'utf8'))?.[1])
+  assert.ok(pid > 0)
+  // Kill and quit in the same main-process turn so shutdown must suppress recovery.
+  const closed = desktop.waitForEvent('close')
+  await desktop.evaluate(({ app }, pid) => {
+    process.kill(pid, 'SIGKILL')
+    app.quit()
+  }, pid)
+  await closed
+  const log = await readFile(logFile, 'utf8')
+  assert.equal([...log.matchAll(/Starting local server:/g)].length, 1)
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+})
+
 test('A second instance restores the existing window and exits', { timeout: 30000 }, async (t) => {
   const { profile, launch: launchDesktop } = await desktopFixture(t, 'single-instance')
   let desktop

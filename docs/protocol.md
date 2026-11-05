@@ -97,6 +97,8 @@ data: {"apiVersion":1,"conversationId":"conversation-id","runId":"run-id","seque
 
 活动任务结束时，服务端在事务中保存最终消息和任务状态，再向现有订阅依次发送 `message.completed`、终态 `run.updated` 并关闭连接。这里的 `message.completed` 表示消息写入已结束，其 `status` 在失败或取消时仍可以是 `interrupted`。
 
+终态保存失败时，服务端保留原结果并断开订阅；查询该会话或任务、重连、提交或删除该会话时重试保存，正常关闭时也会尝试保存待提交结果，不重新调用模型。保存重试仍失败时，对应请求返回 `503 storage_unavailable`；取消请求仍会中止正在运行的模型。读取服务信息、会话列表及其他会话不会触发无关任务的保存重试。若进程在保存成功前退出，下次启动仍按 `interrupted` 恢复，不保证恢复尚未落盘的最终结果。
+
 恢复规则：
 
 1. 每次连接首先发送最新会话快照；当前不根据 `Last-Event-ID` 重放历史增量。
@@ -121,17 +123,17 @@ data: {"apiVersion":1,"conversationId":"conversation-id","runId":"run-id","seque
 }
 ```
 
-| HTTP 状态 | 主要 `error.code`                                      |
-| --------- | ------------------------------------------------------ |
-| 400       | `invalid_request`、`invalid_json`、`request_aborted`   |
-| 401       | `unauthorized`                                         |
-| 403       | `invalid_host`、`invalid_origin`                       |
-| 404       | `conversation_not_found`、`run_not_found`、`not_found` |
-| 405       | `method_not_allowed`                                   |
-| 409       | `conversation_busy`、`idempotency_conflict`            |
-| 413 / 415 | `body_too_large` / `unsupported_media_type`            |
-| 503       | `engine_not_configured`、`shutting_down`               |
-| 500       | `internal_error`                                       |
+| HTTP 状态 | 主要 `error.code`                                               |
+| --------- | --------------------------------------------------------------- |
+| 400       | `invalid_request`、`invalid_json`、`request_aborted`            |
+| 401       | `unauthorized`                                                  |
+| 403       | `invalid_host`、`invalid_origin`                                |
+| 404       | `conversation_not_found`、`run_not_found`、`not_found`          |
+| 405       | `method_not_allowed`                                            |
+| 409       | `conversation_busy`、`idempotency_conflict`                     |
+| 413 / 415 | `body_too_large` / `unsupported_media_type`                     |
+| 503       | `engine_not_configured`、`storage_unavailable`、`shutting_down` |
+| 500       | `internal_error`                                                |
 
 任务被接收后发生的模型失败通过 `Run.status = failed` 与 `Run.error` 表达，不会把已返回的 `202` 改成 HTTP 错误。SSE 响应头已经发送后发生错误会关闭连接，不再追加 JSON 错误正文。
 

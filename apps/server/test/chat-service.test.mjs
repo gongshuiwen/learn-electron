@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { ChatService } from '../src/chat-service.ts'
 import { ChatError } from '../src/errors.ts'
@@ -18,7 +19,8 @@ function deferred() {
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'learn-electron-chat-service-'))
-  const store = new Store(join(directory, 'app.sqlite'))
+  const databasePath = join(directory, 'app.sqlite')
+  const store = new Store(databasePath)
   const calls = []
   let closeCalls = 0
   const engine = {
@@ -61,7 +63,7 @@ async function fixture(t) {
       await rm(directory, { recursive: true, force: true })
     }
   })
-  return { service, store, engine, calls, engineCloseCalls: () => closeCalls }
+  return { service, store, engine, calls, databasePath, engineCloseCalls: () => closeCalls }
 }
 
 test('chat runs without HTTP and isolates detached or failing observers', async (t) => {
@@ -161,4 +163,56 @@ test('chat cancellation preserves partial text and closing drains work and delet
     service.startRun(conversation.id, { message: 'too late', requestId: 'service-request-4' }),
     (error) => error instanceof ChatError && error.code === 'shutting_down',
   )
+})
+
+test('terminal write retries stay within their conversation and never rerun the model', async (t) => {
+  const { service, store, calls, databasePath } = await fixture(t)
+  const conversation = service.createConversation()
+  const request = { message: 'hello', requestId: 'retry-finalization' }
+  const run = await service.startRun(conversation.id, request)
+  const other = service.createConversation()
+  const otherRun = await service.startRun(other.id, {
+    message: 'cancel during storage outage',
+    requestId: 'outage-cancellation',
+  })
+  const ended = deferred()
+  service.subscribe(run.id, { event() {}, close: ended.resolve })
+  const control = new DatabaseSync(databasePath)
+  try {
+    control.exec(`CREATE TRIGGER reject_finalize BEFORE UPDATE OF sequence ON conversations
+      BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;`)
+    calls[0].finish('complete response')
+    assert.ok((await ended.promise) instanceof Error)
+    assert.equal(store.getRun(run.id).status, 'running')
+    assert.equal((await service.meta()).configured, true)
+    assert.equal(service.listConversations().length, 2)
+    assert.equal(service.getConversation(other.id).run.id, otherRun.id)
+    assert.equal(service.getRun(otherRun.id).status, 'running')
+    assert.throws(() => service.getConversation(conversation.id), { code: 'storage_unavailable' })
+    assert.throws(() => service.cancelRun(run.id), { code: 'storage_unavailable' })
+    await assert.rejects(service.startRun(conversation.id, request), {
+      code: 'storage_unavailable',
+    })
+    assert.throws(() => service.cancelRun(otherRun.id), /injected write failure/)
+    assert.equal(calls[1].input.signal.aborted, true)
+    await setImmediate()
+
+    control.exec('DROP TRIGGER reject_finalize')
+    assert.equal(service.cancelRun(run.id).status, 'completed')
+    assert.equal(service.getRun(otherRun.id).status, 'cancelled')
+    assert.equal(service.getConversation(conversation.id).messages[1].content, 'complete response')
+    assert.equal((await service.startRun(conversation.id, request)).id, run.id)
+    assert.equal(calls.length, 2)
+
+    const next = await service.startRun(conversation.id, {
+      message: 'continue',
+      requestId: 'after-finalization',
+    })
+    calls[2].finish('next response')
+    await setImmediate()
+    assert.equal(service.getRun(next.id).status, 'completed')
+  } finally {
+    control.exec('DROP TRIGGER IF EXISTS reject_finalize')
+    control.close()
+  }
 })

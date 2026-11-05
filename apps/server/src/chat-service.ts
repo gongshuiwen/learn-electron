@@ -21,6 +21,13 @@ interface RunObserver {
   close(error?: Error): void
 }
 
+interface PendingFinalization {
+  runId: string
+  text: string | undefined
+  status: Exclude<Run['status'], 'running' | 'cancelling'>
+  error: string | undefined
+}
+
 const MAX_RESPONSE_CHARACTERS = 1_000_000
 
 function eventBase(run: Run, sequence: number) {
@@ -31,6 +38,7 @@ export class ChatService {
   private readonly active = new Map<string, ActiveRun>()
   private readonly deleting = new Map<string, Promise<void>>()
   private readonly subscribers = new Map<string, Set<RunObserver>>()
+  private readonly pendingFinalizations = new Map<string, PendingFinalization>()
   private closing = false
   private closed = false
   private closePromise: Promise<void> | undefined
@@ -42,6 +50,16 @@ export class ChatService {
 
   private assertOpen(): void {
     if (this.closing) throw new ChatError('shutting_down', '服务正在停止')
+  }
+
+  private retryFinalization(conversationId: string): void {
+    const result = this.pendingFinalizations.get(conversationId)
+    if (!result) return
+    try {
+      this.commitFinalization(conversationId, result)
+    } catch {
+      throw new ChatError('storage_unavailable', '任务结果暂未保存，请稍后重试')
+    }
   }
 
   async meta(): Promise<ServiceMeta> {
@@ -61,6 +79,7 @@ export class ChatService {
 
   getConversation(id: string) {
     this.assertOpen()
+    this.retryFinalization(id)
     return this.store.snapshot(id)
   }
 
@@ -71,6 +90,7 @@ export class ChatService {
 
   async deleteConversation(id: string): Promise<void> {
     this.assertOpen()
+    this.retryFinalization(id)
     if (isActiveRun(this.store.snapshot(id).run) || this.deleting.has(id)) {
       throw new ChatError('conversation_busy', '请先停止当前任务，再删除会话')
     }
@@ -87,11 +107,13 @@ export class ChatService {
 
   async startRun(id: string, request: StartRunRequest): Promise<Run> {
     this.assertOpen()
+    this.retryFinalization(id)
     const existing = this.store.findRequest(id, request)
     if (existing) return existing
     if (!(await this.engine.meta()).configured)
       throw new ChatError('engine_not_configured', '请先在服务端配置模型与 API 密钥')
     this.assertOpen()
+    this.retryFinalization(id)
     if (this.deleting.has(id)) throw new ChatError('conversation_busy', '该会话正在删除')
     const started = this.store.start(id, request)
     if (started.created) {
@@ -105,12 +127,8 @@ export class ChatService {
       )
         .catch(() => {
           if (this.closed) return
-          try {
-            this.finishRun(started.run.id, undefined, 'failed', '任务处理失败')
-          } catch {
-            console.error('任务结束状态保存失败', started.run.id)
-            this.closeSubscribers(started.run.id, new Error('任务结束状态保存失败'))
-          }
+          console.error('任务结束状态保存失败，等待重试', started.run.id)
+          this.closeSubscribers(started.run.id, new Error('任务结束状态保存失败'))
         })
         .finally(() => this.active.delete(started.run.id))
       this.active.set(started.run.id, { controller, promise })
@@ -120,25 +138,31 @@ export class ChatService {
 
   getRun(id: string): Run {
     this.assertOpen()
+    const run = this.store.getRun(id)
+    this.retryFinalization(run.conversationId)
     return this.store.getRun(id)
   }
 
   cancelRun(id: string): Run {
-    const run = this.getRun(id)
     const task = this.active.get(id)
-    if (!isActiveRun(run) || !task) return run
-    let cancelling = run
-    if (run.status !== 'cancelling') {
-      const result = this.store.setRunStatus(id, 'cancelling')
-      cancelling = result.run
-      this.publish({
-        ...eventBase(cancelling, result.sequence),
-        type: 'run.updated',
-        run: cancelling,
-      })
+    try {
+      const run = this.getRun(id)
+      if (!isActiveRun(run) || !task) return run
+      let cancelling = run
+      if (run.status !== 'cancelling') {
+        const result = this.store.setRunStatus(id, 'cancelling')
+        cancelling = result.run
+        this.publish({
+          ...eventBase(cancelling, result.sequence),
+          type: 'run.updated',
+          run: cancelling,
+        })
+      }
+      return cancelling
+    } finally {
+      // A storage outage must not prevent stopping a still-running model.
+      task?.controller.abort()
     }
-    task.controller.abort()
-    return cancelling
   }
 
   subscribe(id: string, observer: RunObserver) {
@@ -190,12 +214,21 @@ export class ChatService {
   }
 
   private finishRun(
-    id: string,
+    run: Run,
     text: string | undefined,
     status: Exclude<Run['status'], 'running' | 'cancelling'>,
     error?: string,
   ): void {
-    const finished = this.store.finalizeRun(id, text, status, error)
+    const result = { runId: run.id, text, status, error }
+    // Retain the actual outcome until it commits. Reconnecting or retrying a
+    // request retries this write, never the model call or a replacement result.
+    this.pendingFinalizations.set(run.conversationId, result)
+    this.commitFinalization(run.conversationId, result)
+  }
+
+  private commitFinalization(conversationId: string, result: PendingFinalization): void {
+    const finished = this.store.finalizeRun(result.runId, result.text, result.status, result.error)
+    this.pendingFinalizations.delete(conversationId)
     this.publish({
       ...eventBase(finished.run, finished.messageSequence),
       type: 'message.completed',
@@ -247,7 +280,7 @@ export class ChatService {
     }
     if (this.closed) return
     this.finishRun(
-      run.id,
+      run,
       status === 'completed' ? finalText : undefined,
       status,
       status === 'failed'
@@ -270,6 +303,7 @@ export class ChatService {
         // Native deletion cannot be cancelled; keep the store and lease alive
         // until it finishes, even when the client has already disconnected.
         await Promise.allSettled(this.deleting.values())
+        for (const id of this.pendingFinalizations.keys()) this.retryFinalization(id)
         this.store.interruptActive()
       } finally {
         this.closed = true

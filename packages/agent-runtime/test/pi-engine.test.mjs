@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking } from '@earendil-works/pi-ai'
-import { AgentSession, ModelRuntime } from '@earendil-works/pi-coding-agent'
+import { AgentSession, ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent'
 import { createPiEngine } from '../src/index.ts'
 
 // Only replace the provider boundary. Sessions, event delivery, persistence and
@@ -126,6 +126,61 @@ test(
       { role: 'assistant', text: 'First answer' },
       { role: 'user', text: 'Second question' },
     ])
+    assertReleased()
+  },
+)
+
+test(
+  'Pi accepts a successful recovery after context overflow and native compaction',
+  { timeout: 10_000 },
+  async (t) => {
+    const settings = SettingsManager.inMemory
+    t.mock.method(SettingsManager, 'inMemory', function (options) {
+      // Retain a short tail so a tiny offline conversation can exercise real compaction.
+      return settings.call(this, {
+        ...options,
+        compaction: { ...options.compaction, keepRecentTokens: 1 },
+      })
+    })
+    const { create, assertReleased } = await fixture(t, [
+      fauxAssistantMessage('First answer'),
+      fauxAssistantMessage('', {
+        stopReason: 'error',
+        errorMessage: 'prompt is too long: 220000 tokens > 200000 maximum',
+      }),
+      fauxAssistantMessage('History summary'),
+      fauxAssistantMessage('Turn prefix summary'),
+      fauxAssistantMessage('Recovered answer'),
+    ])
+    const compactions = []
+    const subscribe = AgentSession.prototype.subscribe
+    t.mock.method(AgentSession.prototype, 'subscribe', function (listener) {
+      return subscribe.call(this, (event) => {
+        if (event.type === 'compaction_end') compactions.push(event)
+        listener(event)
+      })
+    })
+    const engine = await create()
+    const conversationId = randomUUID()
+    await engine.run(input({ conversationId }))
+    const deltas = []
+    assert.deepEqual(
+      await engine.run(
+        input({
+          conversationId,
+          message: 'Second question',
+          history: [{ role: 'assistant', content: 'First answer' }],
+          onDelta: (delta) => deltas.push(delta),
+        }),
+      ),
+      { text: 'Recovered answer' },
+    )
+    assert.equal(deltas.join(''), 'Recovered answer')
+    assert.equal(compactions.length, 1)
+    assert.equal(compactions[0].reason, 'overflow')
+    assert.equal(compactions[0].aborted, false)
+    assert.equal(compactions[0].willRetry, true)
+    assert.ok(compactions[0].result)
     assertReleased()
   },
 )

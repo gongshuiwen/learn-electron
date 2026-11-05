@@ -9,6 +9,7 @@ import type {
   StartRunRequest,
 } from '@learn-electron/contracts'
 import { ChatError } from './errors.ts'
+import { migrate } from './migrations.ts'
 
 type Row = Record<string, unknown>
 
@@ -48,28 +49,9 @@ export class Store {
   constructor(path: string) {
     this.db = new DatabaseSync(path)
     try {
-      this.db.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
-      CREATE TABLE IF NOT EXISTS conversations (
-        id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL, sequence INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-        role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id);
-      CREATE TABLE IF NOT EXISTS runs (
-        id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-        status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-        error TEXT, request_id TEXT NOT NULL, request_message TEXT NOT NULL,
-        assistant_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-        UNIQUE (conversation_id, request_id)
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON runs(conversation_id)
-        WHERE status IN ('running', 'cancelling');
-      `)
+      this.db.exec('PRAGMA foreign_keys = ON')
+      migrate(this.db, path)
+      this.db.exec('PRAGMA journal_mode = WAL')
       this.interruptActive()
     } catch (error) {
       this.db.close()
