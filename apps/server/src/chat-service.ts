@@ -139,6 +139,7 @@ export class ChatService {
   getRun(id: string): Run {
     this.assertOpen()
     const run = this.store.getRun(id)
+    if (!this.pendingFinalizations.has(run.conversationId)) return run
     this.retryFinalization(run.conversationId)
     return this.store.getRun(id)
   }
@@ -303,7 +304,15 @@ export class ChatService {
         // Native deletion cannot be cancelled; keep the store and lease alive
         // until it finishes, even when the client has already disconnected.
         await Promise.allSettled(this.deleting.values())
-        for (const id of this.pendingFinalizations.keys()) this.retryFinalization(id)
+        for (const id of this.pendingFinalizations.keys()) {
+          try {
+            this.retryFinalization(id)
+          } catch {
+            // A failure in one conversation must not discard other results.
+          }
+        }
+        if (this.pendingFinalizations.size)
+          throw new ChatError('storage_unavailable', '任务结果暂未保存，请稍后重试')
         this.store.interruptActive()
       } finally {
         this.closed = true

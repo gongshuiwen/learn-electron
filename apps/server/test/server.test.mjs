@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { request as httpRequest } from 'node:http'
-import { setTimeout as delay } from 'node:timers/promises'
+import { DatabaseSync } from 'node:sqlite'
+import { setImmediate, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
 import { startServer } from '../src/server.ts'
 
@@ -559,6 +560,70 @@ test('conversation deletion cleans native context before metadata and excludes n
   assert.equal((await deleting).status, 204)
   assert.equal((await request(`/conversations/${conversation.id}`)).status, 404)
   assert.equal(fake.calls, 0)
+})
+
+test('shutdown saves other pending results when one finalization still fails', async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'learn-electron-shutdown-finalization-'))
+  const databasePath = join(dataDir, 'app.sqlite')
+  const pending = []
+  const fake = engine()
+  fake.run = (input) =>
+    new Promise((finish) => {
+      pending.push({ input, finish })
+    })
+  let service
+  let recovered
+  let control
+  t.after(async () => {
+    if (control) {
+      control.exec('DROP TRIGGER IF EXISTS reject_all; DROP TRIGGER IF EXISTS reject_first')
+      control.close()
+    }
+    await service?.close().catch(() => {})
+    await recovered?.close()
+    assert.equal(dirname(resolve(dataDir)), resolve(tmpdir()))
+    assert.ok(basename(dataDir).startsWith('learn-electron-shutdown-finalization-'))
+    await rm(dataDir, { recursive: true, force: true })
+  })
+
+  service = await startServer({ token: TOKEN, dataDir, engine: fake })
+  const request = client(service.url)
+  const first = await create(request)
+  const second = await create(request)
+  await start(request, first.id, 'shutdown-first')
+  const secondRun = await start(request, second.id, 'shutdown-second')
+  assert.deepEqual(
+    pending.map(({ input }) => input.conversationId),
+    [first.id, second.id],
+  )
+
+  control = new DatabaseSync(databasePath)
+  control.exec(`CREATE TRIGGER reject_all BEFORE UPDATE OF sequence ON conversations
+    BEGIN SELECT RAISE(ABORT, 'injected finalization failure'); END;`)
+  pending[0].finish({ text: 'first completed answer' })
+  pending[1].finish({ text: 'second completed answer' })
+  await setImmediate()
+
+  control.exec('DROP TRIGGER reject_all')
+  control.exec(`CREATE TRIGGER reject_first BEFORE UPDATE OF sequence ON conversations
+    WHEN OLD.id = '${first.id}' BEGIN SELECT RAISE(ABORT, 'first remains unavailable'); END;`)
+  await assert.rejects(service.close(), { code: 'storage_unavailable' })
+  control.exec('DROP TRIGGER reject_first')
+  control.close()
+  control = undefined
+
+  const nextEngine = engine()
+  recovered = await startServer({ token: TOKEN, dataDir, engine: nextEngine })
+  const nextRequest = client(recovered.url)
+  const firstSnapshot = await (await nextRequest(`/conversations/${first.id}`)).json()
+  const snapshot = await (await nextRequest(`/conversations/${second.id}`)).json()
+  assert.equal(firstSnapshot.run.status, 'interrupted')
+  assert.equal(snapshot.run.id, secondRun.id)
+  assert.equal(snapshot.run.status, 'completed')
+  assert.equal(snapshot.messages[1].status, 'complete')
+  assert.equal(snapshot.messages[1].content, 'second completed answer')
+  assert.equal(pending.length, 2)
+  assert.equal(nextEngine.calls, 0)
 })
 
 test(
