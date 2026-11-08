@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "documentation-baseline-maintenance": {
+      "source": "gongshuiwen/skills",
+      "sourceType": "github",
+      "skillPath": "documentation-baseline-maintenance/SKILL.md",
+      "computedHash": "0e9cc54d78a843e56fa0e3e7bd75ee5abd42b22b0287afd8a5d53950f0dc595c"
+    },
     "frontend-design": {
       "source": "anthropics/skills",
       "sourceType": "github",
@@ -11,7 +17,7 @@
       "source": "gongshuiwen/skills",
       "sourceType": "github",
       "skillPath": "test-baseline-maintenance/SKILL.md",
-      "computedHash": "a07acd544f67c0847d8322eb8769d5800a7ed9075b0c52998e273f3ec12c63c0"
+      "computedHash": "9468bd76fa7b75cf8b4e4076955ab0bcbe7c95bc7fb18220f8399832192a1d3b"
     }
   }
 }
