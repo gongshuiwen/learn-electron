@@ -40,6 +40,7 @@ function run(row: Row): Run {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     ...(typeof row.error === 'string' ? { error: row.error } : {}),
+    ...(typeof row.error_code === 'string' ? { errorCode: row.error_code } : {}),
   }
 }
 
@@ -157,6 +158,7 @@ export class Store {
   start(
     id: string,
     request: StartRunRequest,
+    connectionId = 'env',
   ): {
     run: Run
     created: boolean
@@ -186,6 +188,14 @@ export class Store {
       const history = this.snapshot(id)
         .messages.filter((item) => item.status === 'complete')
         .map(({ role, content }) => ({ role, content }))
+      const binding = this.db
+        .prepare('SELECT connection_id FROM conversations WHERE id = ?')
+        .get(id)?.connection_id
+      if (binding && binding !== connectionId)
+        throw new ChatError('connection_changed', '此会话属于其他模型连接，请切回原连接或新建会话')
+      this.db
+        .prepare('UPDATE conversations SET connection_id = ? WHERE id = ?')
+        .run(connectionId, id)
       const now = new Date().toISOString()
       const runId = randomUUID()
       const assistantId = randomUUID()
@@ -193,7 +203,9 @@ export class Store {
       insert.run(randomUUID(), id, 'user', request.message, now, 'complete')
       insert.run(assistantId, id, 'assistant', '', now, 'streaming')
       this.db
-        .prepare('INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .prepare(
+          'INSERT INTO runs (id, conversation_id, status, created_at, updated_at, error, request_id, request_message, assistant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )
         .run(runId, id, 'running', now, now, null, request.requestId, request.message, assistantId)
       this.bump(id)
       return { run: this.getRun(runId), created: true, assistantId, history }
@@ -227,6 +239,7 @@ export class Store {
     text: string | undefined,
     status: Exclude<RunStatus, 'running' | 'cancelling'>,
     error?: string,
+    errorCode?: string,
   ): { message: Message; run: Run; messageSequence: number; runSequence: number } {
     return this.transaction(() => {
       const item = this.getRun(runId)
@@ -235,8 +248,10 @@ export class Store {
         WHERE id = (SELECT assistant_id FROM runs WHERE id = ?)`)
         .run(text ?? null, status === 'completed' ? 'complete' : 'interrupted', runId)
       this.db
-        .prepare('UPDATE runs SET status = ?, updated_at = ?, error = ? WHERE id = ?')
-        .run(status, new Date().toISOString(), error ?? null, runId)
+        .prepare(
+          'UPDATE runs SET status = ?, updated_at = ?, error = ?, error_code = ? WHERE id = ?',
+        )
+        .run(status, new Date().toISOString(), error ?? null, errorCode ?? null, runId)
       const row = this.db
         .prepare('SELECT * FROM messages WHERE id = (SELECT assistant_id FROM runs WHERE id = ?)')
         .get(runId)

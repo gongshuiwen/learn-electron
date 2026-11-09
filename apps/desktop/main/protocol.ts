@@ -39,7 +39,7 @@ export function registerDesktopProtocol(
     if (origin && allowedOrigins.has(origin)) {
       cors.set('Access-Control-Allow-Origin', origin)
       cors.set('Vary', 'Origin')
-      cors.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+      cors.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
       cors.set('Access-Control-Allow-Headers', 'Content-Type')
     }
     if (

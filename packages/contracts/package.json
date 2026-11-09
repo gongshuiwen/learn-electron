@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./native": "./src/native.ts"
+    "./native": "./src/native.ts",
+    "./chatgpt": "./src/chatgpt.ts"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs"

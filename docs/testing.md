@@ -42,7 +42,15 @@ node --test --test-concurrency=1 apps/desktop/test/integration/lifecycle.test.mj
 | Pi 适配   | 离线验证真实 session 与上下文持久化    |
 | 桌面集成  | 真实本地后端与 mock 引擎的集成链路     |
 
+ChatGPT 测试使用本地 OAuth/Responses 服务及真正签名的 ID token，不读取用户凭证或访问真实模型。后端覆盖 JWKS 身份校验、注册复用、权限不足、取消/超时、令牌轮换与账号上下文归属；HTTP 集成覆盖真实 Pi、SSE、重启续聊和失败不回退 API Key。Web 集成复用真实浏览器、后端及 Pi，在授权进行中于同一端口关闭并重建后端，验证页面不刷新、草稿保留、旧登录返回 `404 login_not_found` 后可重新授权，并直接发送草稿完成两轮上下文聊天；同一用例保留授权过程中刷新恢复、聊天历史重载与退出的检查。桌面测试验证受限浏览器 IPC 和 PUT 代理。Web 测试入口使用 `tsx` 以加载集成测试中的后端 TypeScript。
+
+Web 登录恢复回归使用模拟 HTTP 响应，分别验证轮询、取消遇到 `404 login_not_found` 后结束旧尝试并直接重新登录，以及临时错误时保留进行中的登录；浏览器与后端的集成用例同时验证添加连接与重新授权分别使用新注册和已保存的连接。
+
+Pi 代理回归使用独立 Node 进程和真实本地 HTTP 代理，验证 SDK 初始化前后都经过环境代理，以及 `NO_PROXY` 对回环请求的绕过；不替换 `fetch` 或访问外网。
+
 自动化测试不覆盖真实提供商网络连接；页面恢复测试不验证操作系统原生崩溃事件投递。
+
+真实账户验收使用 `PI_AUTH_MODE=chatgpt`：在系统浏览器授权计划使用，确认账户和模型，连续发送两轮消息，重启应用后续聊，查看 ChatGPT 用量设置，再验证退出和重新授权。检查真实上游成功前，不将模拟授权测试视为订阅可用性的证明。网络、账户/工作区政策及上游权限失败应记录实际状态，不关闭 TLS、绕过站点验证或改用 API Key。
 
 ## 交付验证
 
@@ -52,4 +60,4 @@ node --test --test-concurrency=1 apps/desktop/test/integration/lifecycle.test.mj
 npm run test:packaged
 ```
 
-该命令通过 `pretest:packaged` 准备 `win-unpacked` 应用，并复制到仓库外，验证无系统 Node 的运行、历史恢复、后台进程清理及生产 Pi 依赖的离线加载；NSIS 安装/卸载、签名和更新按任务需要另行验证。
+该命令通过 `pretest:packaged` 准备 `win-unpacked` 应用，并复制到仓库外，验证无系统 Node 的运行、历史恢复、后台进程清理、生产 Pi 依赖的离线加载，以及 ChatGPT 模式的 `jose`、Windows 凭证目录权限和登录入口；NSIS 安装/卸载、签名和更新按任务需要另行验证。

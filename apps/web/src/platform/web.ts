@@ -1,4 +1,4 @@
-import { isThemeSource } from '@learn-electron/contracts/native'
+import { isChatGPTUrl, isThemeSource } from '@learn-electron/contracts/native'
 import type { ThemeSource } from '@learn-electron/contracts/native'
 import type { Platform } from './contracts'
 
@@ -16,6 +16,11 @@ function applyTheme(): void {
 export const webPlatform: Platform = {
   kind: 'web',
   apiBaseUrl: '',
+  openChatGPTUrl: (url) => {
+    if (!isChatGPTUrl(url)) return Promise.reject(new Error('不允许的 ChatGPT 地址'))
+    window.open(url, '_blank', 'noopener,noreferrer')
+    return Promise.resolve()
+  },
   getTheme: () => {
     try {
       const stored = localStorage.getItem(themeKey)

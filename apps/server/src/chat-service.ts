@@ -7,6 +7,7 @@ import {
   type StartRunRequest,
 } from '@learn-electron/contracts'
 import type { AgentEngine, EngineRunInput } from '@learn-electron/agent-runtime'
+import { ModelError } from '@learn-electron/agent-runtime'
 import { ChatError } from './errors.ts'
 import type { Store } from './store.ts'
 import { waitWithin } from './wait-within.ts'
@@ -26,6 +27,7 @@ interface PendingFinalization {
   text: string | undefined
   status: Exclude<Run['status'], 'running' | 'cancelling'>
   error: string | undefined
+  errorCode: string | undefined
 }
 
 const MAX_RESPONSE_CHARACTERS = 1_000_000
@@ -64,7 +66,15 @@ export class ChatService {
 
   async meta(): Promise<ServiceMeta> {
     this.assertOpen()
-    return { ...(await this.engine.meta()), apiVersion: API_VERSION }
+    const info = await this.engine.meta()
+    return {
+      engine: info.engine,
+      model: info.model,
+      configured: info.configured,
+      capabilities: info.capabilities,
+      apiVersion: API_VERSION,
+      ...(info.authMode ? { authMode: info.authMode } : {}),
+    }
   }
 
   listConversations() {
@@ -110,12 +120,18 @@ export class ChatService {
     this.retryFinalization(id)
     const existing = this.store.findRequest(id, request)
     if (existing) return existing
-    if (!(await this.engine.meta()).configured)
-      throw new ChatError('engine_not_configured', '请先在服务端配置模型与 API 密钥')
+    const info = await this.engine.meta()
+    if (!info.configured)
+      throw new ChatError(
+        'engine_not_configured',
+        info.authMode === 'chatgpt'
+          ? '请先连接 ChatGPT、授权使用计划并选择可用模型'
+          : '请先在服务端配置模型与 API 密钥',
+      )
     this.assertOpen()
     this.retryFinalization(id)
     if (this.deleting.has(id)) throw new ChatError('conversation_busy', '该会话正在删除')
-    const started = this.store.start(id, request)
+    const started = this.store.start(id, request, info.connectionId)
     if (started.created) {
       const controller = new AbortController()
       const promise = this.execute(
@@ -124,6 +140,7 @@ export class ChatService {
         request.message,
         started.history,
         controller,
+        info.connectionId,
       )
         .catch(() => {
           if (this.closed) return
@@ -142,6 +159,27 @@ export class ChatService {
     if (!this.pendingFinalizations.has(run.conversationId)) return run
     this.retryFinalization(run.conversationId)
     return this.store.getRun(id)
+  }
+
+  isBusy(): boolean {
+    return this.active.size > 0 || this.deleting.size > 0
+  }
+
+  async cancelAll(): Promise<void> {
+    for (const [id, task] of this.active) {
+      try {
+        this.cancelRun(id)
+      } finally {
+        task.controller.abort()
+      }
+    }
+    if (
+      !(await waitWithin(
+        Promise.allSettled([...this.active.values()].map((task) => task.promise)),
+        3000,
+      ))
+    )
+      throw new ChatError('conversation_busy', '任务仍在停止中，请稍后再退出登录')
   }
 
   cancelRun(id: string): Run {
@@ -219,8 +257,9 @@ export class ChatService {
     text: string | undefined,
     status: Exclude<Run['status'], 'running' | 'cancelling'>,
     error?: string,
+    errorCode?: string,
   ): void {
-    const result = { runId: run.id, text, status, error }
+    const result = { runId: run.id, text, status, error, errorCode }
     // Retain the actual outcome until it commits. Reconnecting or retrying a
     // request retries this write, never the model call or a replacement result.
     this.pendingFinalizations.set(run.conversationId, result)
@@ -228,7 +267,13 @@ export class ChatService {
   }
 
   private commitFinalization(conversationId: string, result: PendingFinalization): void {
-    const finished = this.store.finalizeRun(result.runId, result.text, result.status, result.error)
+    const finished = this.store.finalizeRun(
+      result.runId,
+      result.text,
+      result.status,
+      result.error,
+      result.errorCode,
+    )
     this.pendingFinalizations.delete(conversationId)
     this.publish({
       ...eventBase(finished.run, finished.messageSequence),
@@ -248,15 +293,18 @@ export class ChatService {
     text: string,
     history: EngineRunInput['history'],
     controller: AbortController,
+    connectionId?: string,
   ): Promise<void> {
     let receivedCharacters = 0
     let finalText: string | undefined
     let status: Run['status'] = 'completed'
+    let failure: ModelError | undefined
     try {
       const result = await this.engine.run({
         conversationId: run.conversationId,
         message: text,
         history,
+        ...(connectionId ? { connectionId } : {}),
         signal: controller.signal,
         onDelta: (delta) => {
           if (this.closed || controller.signal.aborted) return
@@ -276,7 +324,8 @@ export class ChatService {
       })
       finalText = result.text.slice(0, MAX_RESPONSE_CHARACTERS)
       if (controller.signal.aborted) status = this.closing ? 'interrupted' : 'cancelled'
-    } catch {
+    } catch (error) {
+      if (error instanceof ModelError) failure = error
       status = controller.signal.aborted ? (this.closing ? 'interrupted' : 'cancelled') : 'failed'
     }
     if (this.closed) return
@@ -285,10 +334,11 @@ export class ChatService {
       status === 'completed' ? finalText : undefined,
       status,
       status === 'failed'
-        ? '模型请求失败，请检查服务端配置或稍后重试'
+        ? (failure?.message ?? '模型请求失败，请检查服务端配置或稍后重试')
         : status === 'interrupted'
           ? '服务已停止，任务没有自动重放'
           : undefined,
+      status === 'failed' ? failure?.code : undefined,
     )
   }
 

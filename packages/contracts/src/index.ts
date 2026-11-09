@@ -7,6 +7,7 @@ export interface ServiceMeta {
   model: { provider: string; id: string }
   configured: boolean
   capabilities: { tools: boolean }
+  authMode?: 'chatgpt'
 }
 
 export interface Conversation {
@@ -39,6 +40,7 @@ export interface Run {
   createdAt: string
   updatedAt: string
   error?: string
+  errorCode?: string
 }
 
 export interface ConversationSnapshot {
@@ -131,7 +133,8 @@ function isRun(value: unknown): value is Run {
     ['running', 'cancelling', 'completed', 'cancelled', 'failed', 'interrupted'].includes(
       value.status,
     ) &&
-    (value.error === undefined || typeof value.error === 'string')
+    (value.error === undefined || typeof value.error === 'string') &&
+    (value.errorCode === undefined || typeof value.errorCode === 'string')
   )
 }
 
@@ -162,7 +165,8 @@ export function parseServiceMeta(value: unknown): ServiceMeta {
     typeof value.model.id !== 'string' ||
     typeof value.configured !== 'boolean' ||
     !isRecord(value.capabilities) ||
-    typeof value.capabilities.tools !== 'boolean'
+    typeof value.capabilities.tools !== 'boolean' ||
+    (value.authMode !== undefined && value.authMode !== 'chatgpt')
   ) {
     throw new Error('服务端元信息格式不兼容，请刷新页面。')
   }
@@ -172,6 +176,7 @@ export function parseServiceMeta(value: unknown): ServiceMeta {
     model: { provider: value.model.provider, id: value.model.id },
     configured: value.configured,
     capabilities: { tools: value.capabilities.tools },
+    ...(value.authMode === 'chatgpt' ? { authMode: 'chatgpt' as const } : {}),
   }
 }
 

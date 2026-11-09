@@ -9,7 +9,19 @@ import {
   type ApiError,
   type RunEvent,
 } from '@learn-electron/contracts'
-import { createPiEngine, type AgentEngine } from '@learn-electron/agent-runtime'
+import {
+  createPiEngine,
+  getOpenAIModels,
+  ModelError,
+  type AgentEngine,
+} from '@learn-electron/agent-runtime'
+import {
+  parseLoginRequest,
+  parseModelSelection,
+  parseProfileId,
+} from '@learn-electron/contracts/chatgpt'
+import { ChatGPTConnectionService } from './chatgpt/connection-service.ts'
+import type { ChatGPTOAuth } from './chatgpt/oauth.ts'
 import { ChatService } from './chat-service.ts'
 import { ChatError, HttpError, type ChatErrorCode } from './errors.ts'
 import { acquireDataDirectory } from './ownership.ts'
@@ -23,6 +35,8 @@ export interface ServerOptions {
   dataDir: string
   engine?: AgentEngine
   allowedOrigins?: string[]
+  authMode?: 'env' | 'chatgpt'
+  chatgptOAuth?: ChatGPTOAuth
 }
 
 const MAX_BODY_BYTES = 160 * 1024
@@ -35,6 +49,7 @@ const CHAT_ERROR_STATUS: Record<ChatErrorCode, number> = {
   engine_not_configured: 503,
   storage_unavailable: 503,
   shutting_down: 503,
+  connection_changed: 409,
 }
 
 function json(response: ServerResponse, status: number, value: unknown): void {
@@ -97,10 +112,27 @@ export async function startServer(
   const directory = resolve(options.dataDir)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const releaseOwnership = await acquireDataDirectory(directory)
+  let connections: ChatGPTConnectionService | undefined
+  let isChatBusy = () => false
   let engine: AgentEngine
   try {
-    engine = options.engine ?? (await createPiEngine({ dataDir: join(directory, 'pi') }))
+    const authMode = options.authMode ?? process.env.PI_AUTH_MODE ?? 'env'
+    if (authMode !== 'env' && authMode !== 'chatgpt')
+      throw new Error('PI_AUTH_MODE 仅支持 env 或 chatgpt')
+    if (authMode === 'chatgpt' && !options.engine) {
+      connections = await ChatGPTConnectionService.create({
+        dataDir: directory,
+        models: await getOpenAIModels(),
+        isBusy: () => isChatBusy(),
+        oauth: options.chatgptOAuth,
+        model: process.env.PI_MODEL || undefined,
+      })
+    }
+    engine =
+      options.engine ??
+      (await createPiEngine({ dataDir: join(directory, 'pi'), subscription: connections }))
   } catch (error) {
+    await connections?.close()
     await releaseOwnership()
     throw error
   }
@@ -110,12 +142,14 @@ export async function startServer(
   } catch (error) {
     try {
       await waitWithin(engine.close(), 3000)
+      await connections?.close()
     } finally {
       await releaseOwnership()
     }
     throw error
   }
   const chat = new ChatService(store, engine)
+  isChatBusy = () => chat.isBusy()
   const origins = new Set(options.allowedOrigins ?? [])
   let expectedHost = ''
   let url = ''
@@ -145,7 +179,7 @@ export async function startServer(
     }
     if (request.method === 'OPTIONS') {
       response.writeHead(204, {
-        'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Authorization, Content-Type',
         'Access-Control-Max-Age': '600',
       })
@@ -156,8 +190,47 @@ export async function startServer(
       throw new HttpError(401, 'unauthorized', '需要有效的服务访问令牌')
     }
     if (closing) throw new HttpError(503, 'shutting_down', '服务正在停止')
-    const pathname = new URL(request.url ?? '/', url).pathname
+    const requestUrl = new URL(request.url ?? '/', url)
+    const pathname = requestUrl.pathname
     const method = request.method
+    if (pathname === `${API_PREFIX}/auth/chatgpt` && method === 'GET') {
+      json(response, 200, connections?.status() ?? { enabled: false, activeId: null, profiles: [] })
+      return
+    }
+    if (
+      pathname.startsWith(`${API_PREFIX}/auth/chatgpt/`) ||
+      pathname === `${API_PREFIX}/models` ||
+      pathname === `${API_PREFIX}/model`
+    ) {
+      if (!connections)
+        throw new HttpError(409, 'auth_mode_disabled', '当前使用服务端 API Key 模式')
+      const loginRoute = /^\/api\/v1\/auth\/chatgpt\/logins\/([\w-]+)$/.exec(pathname)
+      if (pathname === `${API_PREFIX}/auth/chatgpt/login` && method === 'POST') {
+        const body = parse(parseLoginRequest, await readJson(request))
+        json(response, 201, await connections.beginLogin(body.profileId))
+      } else if (loginRoute?.[1] && method === 'GET')
+        json(response, 200, connections.login(loginRoute[1]))
+      else if (loginRoute?.[1] && method === 'DELETE') {
+        connections.cancelLogin(loginRoute[1])
+        response.writeHead(204)
+        response.end()
+      } else if (pathname === `${API_PREFIX}/auth/chatgpt/select` && method === 'POST') {
+        await connections.select(parse(parseProfileId, await readJson(request)))
+        json(response, 200, connections.status())
+      } else if (pathname === `${API_PREFIX}/auth/chatgpt/logout` && method === 'POST') {
+        json(response, 200, await connections.logout(() => chat.cancelAll()))
+      } else if (pathname === `${API_PREFIX}/models` && method === 'GET') {
+        json(
+          response,
+          200,
+          await connections.models(requestUrl.searchParams.get('refresh') === '1'),
+        )
+      } else if (pathname === `${API_PREFIX}/model` && method === 'PUT') {
+        await connections.selectModel(parse(parseModelSelection, await readJson(request)))
+        json(response, 200, await chat.meta())
+      } else throw new HttpError(405, 'method_not_allowed', '不支持的请求方法')
+      return
+    }
     if (pathname === `${API_PREFIX}/meta` && method === 'GET') {
       json(response, 200, await chat.meta())
       return
@@ -242,7 +315,9 @@ export async function startServer(
             ? error
             : error instanceof ChatError
               ? new HttpError(CHAT_ERROR_STATUS[error.code], error.code, error.message)
-              : new HttpError(500, 'internal_error', '服务处理请求失败')
+              : error instanceof ModelError
+                ? new HttpError(503, error.code, error.message)
+                : new HttpError(500, 'internal_error', '服务处理请求失败')
         const body: ApiError = { error: { code: failure.code, message: failure.message } }
         json(response, failure.status, body)
       })
@@ -267,6 +342,7 @@ export async function startServer(
     try {
       store.close()
       await waitWithin(engine.close(), 3000)
+      await connections?.close()
     } finally {
       await releaseOwnership()
     }
@@ -277,7 +353,9 @@ export async function startServer(
     closePromise ??= (async () => {
       closing = true
       try {
-        await chat.close()
+        // Stop callback admission immediately, then drain queued refresh persistence.
+        const results = await Promise.allSettled([connections?.close(), chat.close()])
+        for (const result of results) if (result.status === 'rejected') throw result.reason
       } finally {
         await new Promise<void>((done) => {
           server.close(() => done())

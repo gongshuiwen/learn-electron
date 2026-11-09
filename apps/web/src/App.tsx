@@ -16,6 +16,7 @@ import { ThemeSelect } from '@/components/ThemeSelect'
 import { MessageList } from '@/features/chat/MessageList'
 import { useChat } from '@/features/chat/use-chat'
 import { platform } from '@/platform'
+import { ChatGPTConnection } from '@/features/chatgpt/ChatGPTConnection'
 
 export default function App() {
   const chat = useChat()
@@ -81,6 +82,13 @@ export default function App() {
             </p>
           ) : null}
         </nav>
+        {chat.meta?.authMode === 'chatgpt' ? (
+          <ChatGPTConnection
+            onChanged={chat.refreshMeta}
+            activeRun={chat.active}
+            failureKey={run?.status === 'failed' ? run.id : undefined}
+          />
+        ) : null}
         <div className="sidebar-footer">
           <ThemeSelect />
           <p>
@@ -202,7 +210,9 @@ export default function App() {
         ) : null}
         {chat.meta && !chat.meta.configured ? (
           <div className="notice" role="status">
-            尚未配置模型。请在服务端设置模型及 API Key 环境变量后重启服务；浏览器无需填写密钥。
+            {chat.meta.authMode === 'chatgpt'
+              ? '请在侧栏连接 ChatGPT，授权使用计划并选择可用模型。'
+              : '尚未配置模型。请在服务端设置模型及 API Key 环境变量后重启服务；浏览器无需填写密钥。'}
           </div>
         ) : null}
         {chat.active && chat.connection === 'reconnecting' ? (
@@ -275,7 +285,11 @@ export default function App() {
               maxLength={32000}
               value={draft}
               placeholder={
-                chat.meta?.configured === false ? '请先在服务端配置模型…' : '写下你的问题…'
+                chat.meta?.configured === false
+                  ? chat.meta.authMode === 'chatgpt'
+                    ? '请先连接 ChatGPT 并选择模型…'
+                    : '请先在服务端配置模型…'
+                  : '写下你的问题…'
               }
               disabled={!chat.meta?.configured || chat.loading}
               onChange={(event) => setDraft(event.currentTarget.value)}

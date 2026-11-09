@@ -26,11 +26,14 @@
 
 @layer components {
   .app-shell {
-    @apply flex min-h-dvh bg-stone-50 dark:bg-stone-950;
+    @apply flex h-dvh bg-stone-50 dark:bg-stone-950;
   }
   .sidebar {
     position: relative;
-    @apply flex w-64 shrink-0 flex-col border-r border-stone-200 bg-stone-100/80 p-5 dark:border-stone-800 dark:bg-stone-900/50;
+    @apply flex w-64 shrink-0 flex-col overflow-y-auto border-r border-stone-200 bg-stone-100/80 p-5 dark:border-stone-800 dark:bg-stone-900/50;
+  }
+  .chatgpt-toggle {
+    display: none;
   }
   .brand {
     @apply mb-8 flex items-center gap-3 px-1;
@@ -198,6 +201,7 @@
     padding: 12px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--color-stone-200);
+    max-height: 50dvh;
   }
   .brand,
   .sidebar-caption {
@@ -229,7 +233,15 @@
     flex-shrink: 0;
   }
   .chat-panel {
-    height: calc(100dvh - 122px);
+    flex: 1;
+    min-height: 0;
+    height: auto;
+  }
+  .chatgpt-toggle {
+    display: block;
+  }
+  .chatgpt-controls:not(.is-open) {
+    display: none;
   }
   .chat-header {
     min-height: 64px;

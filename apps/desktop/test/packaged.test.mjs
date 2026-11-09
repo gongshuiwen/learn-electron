@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { _electron as electron } from 'playwright-core'
@@ -21,16 +21,21 @@ test(
     let desktop
     t.after(async () => {
       await desktop?.close()
+      for (const target of [profile, standalone]) {
+        assert.equal(dirname(resolve(target)), resolve(tmpdir()))
+        assert.ok(basename(target).startsWith('pi-chat-'))
+      }
       await rm(profile, { recursive: true, force: true })
       await rm(standalone, { recursive: true, force: true, maxRetries: 5 })
     })
     // Run outside the repository so a missing delivery dependency cannot resolve
     // through the development workspace's node_modules directory.
     await cp(join(root, 'dist/win-unpacked'), standalone, { recursive: true })
-    async function launch(engine = 'mock') {
+    async function launch(engine = 'mock', authMode = 'env') {
       const environment = {
         ...process.env,
         APP_ENGINE: engine,
+        PI_AUTH_MODE: authMode,
         PI_PROVIDER: '__missing_provider__',
         PI_MODEL: '__missing_model__',
         // Neither a system Node nor this development override may be required.
@@ -82,5 +87,20 @@ test(
     })
     assert.equal(meta.engine, 'pi')
     assert.equal(meta.configured, false)
+    await desktop.close()
+    desktop = undefined
+    // The OAuth mode must also start with only the delivered Node, jose and Windows ACL helper.
+    page = await launch('pi', 'chatgpt')
+    await page.getByRole('button', { name: 'Continue with ChatGPT' }).waitFor()
+    const state = await page.evaluate(async () => {
+      const response = await fetch(`${window.electronAPI.apiBaseUrl}/api/v1/auth/chatgpt`)
+      return response.json()
+    })
+    assert.deepEqual(state, { enabled: true, activeId: null, profiles: [] })
+    assert.equal(
+      await page.getByRole('textbox', { name: '发送消息', exact: true }).isDisabled(),
+      true,
+    )
+    await page.screenshot({ path: join(root, '.cache/packaged-chatgpt.png'), fullPage: true })
   },
 )

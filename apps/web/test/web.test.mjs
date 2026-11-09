@@ -62,6 +62,127 @@ async function rename(page, title) {
   await page.getByRole('textbox', { name: '对话标题' }).waitFor({ state: 'hidden' })
 }
 
+for (const operation of ['polling', 'cancelling']) {
+  test(
+    `Web recovers a missing ChatGPT login while ${operation}`,
+    { timeout: 30_000 },
+    async (t) => {
+      const authorizationUrl = `https://auth.openai.com/api/accounts/authorize?${new URLSearchParams(
+        {
+          client_id: 'test-client',
+          response_type: 'code',
+          redirect_uri: 'http://127.0.0.1:12345/auth/callback',
+          state: 'state',
+          nonce: 'nonce',
+          code_challenge: 'challenge',
+          code_challenge_method: 'S256',
+        },
+      )}`
+      let pendingLogin = {
+        id: 'old-login',
+        status: 'pending',
+        authorizationUrl,
+        expiresAt: new Date(Date.now() + 900_000).toISOString(),
+      }
+      let oldReads = 0
+      let cancelCalls = 0
+      const starts = []
+      const { page } = await fixture(t, (api) => {
+        const handle = api.handle.bind(api)
+        api.handle = async (route) => {
+          const request = route.request()
+          const path = new URL(request.url()).pathname.replace('/api/v1', '')
+          const json = (body, status = 200) =>
+            route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+          const missing = () => {
+            pendingLogin = null
+            return json(
+              { error: { code: 'login_not_found', message: '登录请求不存在，请重新登录' } },
+              404,
+            )
+          }
+          if (path === '/meta')
+            return json({
+              apiVersion: 1,
+              engine: 'pi',
+              model: { provider: 'openai', id: 'unconfigured' },
+              configured: false,
+              capabilities: { tools: false },
+              authMode: 'chatgpt',
+            })
+          if (path === '/models') return json([])
+          if (path === '/auth/chatgpt')
+            return json({
+              enabled: true,
+              activeId: null,
+              profiles: [],
+              ...(pendingLogin ? { pendingLogin } : {}),
+            })
+          if (path === '/auth/chatgpt/login' && request.method() === 'POST') {
+            assert.equal(pendingLogin, null)
+            starts.push(request.postDataJSON())
+            pendingLogin = {
+              id: 'new-login',
+              status: 'pending',
+              authorizationUrl,
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+            }
+            return json(pendingLogin, 201)
+          }
+          if (path === '/auth/chatgpt/logins/old-login') {
+            if (request.method() === 'DELETE') {
+              if (++cancelCalls === 1)
+                return json({ error: { code: 'unavailable', message: '取消暂不可用' } }, 503)
+              return missing()
+            }
+            oldReads++
+            if (operation === 'polling') {
+              if (oldReads === 1)
+                return json({ error: { code: 'unavailable', message: '服务暂不可用' } }, 503)
+              return missing()
+            }
+            return pendingLogin ? json(pendingLogin) : missing()
+          }
+          if (path === '/auth/chatgpt/logins/new-login') return json(pendingLogin)
+          return handle(route)
+        }
+      })
+      await page
+        .context()
+        .route('https://auth.openai.com/api/accounts/authorize?**', (route) =>
+          route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<p>新的登录请求</p>' }),
+        )
+      const start = page.getByRole('button', { name: 'Continue with ChatGPT', exact: true })
+      const cancel = page.getByRole('button', { name: '取消登录', exact: true })
+      await cancel.waitFor()
+      if (operation === 'polling') {
+        await page.getByText('登录状态暂不可用，正在重新连接…', { exact: true }).waitFor()
+        assert.equal(await start.isDisabled(), true)
+        assert.equal(await cancel.isVisible(), true)
+        await page.getByText('登录请求已失效，请重新登录。', { exact: true }).waitFor()
+      } else {
+        await cancel.click()
+        await page.getByText('取消暂不可用', { exact: true }).waitFor()
+        assert.equal(await start.isDisabled(), true)
+        assert.equal(await cancel.isVisible(), true)
+        await cancel.click()
+      }
+      await cancel.waitFor({ state: 'hidden' })
+      const readsAfterRecovery = oldReads
+      const popupEvent = page.context().waitForEvent('page')
+      const newPoll = page.waitForResponse((response) =>
+        response.url().endsWith('/auth/chatgpt/logins/new-login'),
+      )
+      await start.click()
+      await (await popupEvent).getByText('新的登录请求', { exact: true }).waitFor()
+      await newPoll
+      assert.deepEqual(starts, [{}])
+      assert.equal(await cancel.isVisible(), true)
+      assert.equal(oldReads, readsAfterRecovery)
+    },
+  )
+}
+
 test(
   'Web theme persists and follows the system without an Electron bridge',
   { timeout: 30_000 },

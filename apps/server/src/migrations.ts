@@ -22,6 +22,10 @@ const migrations = [
   );
   CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON runs(conversation_id)
     WHERE status IN ('running', 'cancelling');`,
+  `ALTER TABLE conversations ADD COLUMN connection_id TEXT;
+  ALTER TABLE runs ADD COLUMN error_code TEXT;
+  UPDATE conversations SET connection_id = 'env'
+    WHERE EXISTS (SELECT 1 FROM messages WHERE conversation_id = conversations.id);`,
 ]
 
 export function migrate(db: DatabaseSync, path: string): void {

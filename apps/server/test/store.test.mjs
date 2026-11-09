@@ -59,7 +59,7 @@ test('an unversioned database is backed up and adopted without losing history or
     assert.ok((await stat(`${path}-wal`)).size > 0)
 
     store = new Store(path)
-    assert.equal(legacy.prepare('PRAGMA user_version').get().user_version, 1)
+    assert.equal(legacy.prepare('PRAGMA user_version').get().user_version, 2)
     const snapshot = store.snapshot(conversationId)
     assert.equal(snapshot.conversation.title, 'Saved conversation')
     assert.equal(snapshot.sequence, 3)

@@ -6,6 +6,7 @@ export type ChatErrorCode =
   | 'engine_not_configured'
   | 'storage_unavailable'
   | 'shutting_down'
+  | 'connection_changed'
 
 export class ChatError extends Error {
   constructor(

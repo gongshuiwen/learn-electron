@@ -5,7 +5,10 @@ import { build } from 'esbuild'
 import { parseRun } from '@learn-electron/contracts'
 
 const bundled = await build({
-  entryPoints: [fileURLToPath(new URL('../src/features/chat/api.ts', import.meta.url))],
+  stdin: {
+    contents: "export * from './src/features/chat/api.ts'; export * from './src/lib/api.ts'",
+    resolveDir: fileURLToPath(new URL('../', import.meta.url)),
+  },
   bundle: true,
   platform: 'node',
   format: 'esm',

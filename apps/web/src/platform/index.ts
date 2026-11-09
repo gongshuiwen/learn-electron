@@ -8,6 +8,7 @@ export const platform: Platform = native
       apiBaseUrl: native.apiBaseUrl,
       getTheme: () => native.getTheme(),
       setTheme: (value) => native.setTheme(value),
+      openChatGPTUrl: (url) => native.openChatGPTUrl(url),
     }
   : webPlatform
 

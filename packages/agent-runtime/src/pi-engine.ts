@@ -1,6 +1,8 @@
 import { mkdir, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
+import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici8'
 import { InMemoryCredentialStore } from '@earendil-works/pi-ai'
+import { openaiProvider } from '@earendil-works/pi-ai/providers/openai'
 import {
   createAgentSession,
   createExtensionRuntime,
@@ -11,6 +13,11 @@ import {
   type ResourceLoader,
 } from '@earendil-works/pi-coding-agent'
 import type { AgentEngine, EngineInfo, PiEngineOptions } from './index.ts'
+import { ModelError, type ModelErrorCode } from './index.ts'
+
+// The SDK imports Undici 8, replacing Node's environment-proxy dispatcher.
+// Reapply proxy policy here so OAuth and model requests keep the same routing.
+setGlobalDispatcher(new EnvHttpProxyAgent())
 
 const SYSTEM_PROMPT =
   'You are a helpful assistant in a desktop and web chat application. ' +
@@ -41,26 +48,58 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
   await mkdir(cwd, { recursive: true })
   await mkdir(sessionsDir, { recursive: true })
 
-  // In-memory credentials and no model file: provider keys resolve from server
-  // environment only, without reading or writing a user's global Pi profile.
+  // No SDK-owned secrets or model file. API keys use the server environment;
+  // subscription access uses the app's token resolver, never a global Pi profile.
   const runtime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(),
     modelsPath: null,
     allowModelNetwork: false,
   })
-  const requestedProvider = options.provider ?? process.env.PI_PROVIDER
+  const subscription = options.subscription
+  if (subscription) {
+    const provider = openaiProvider()
+    runtime.registerNativeProvider({
+      ...provider,
+      getAllModels: () => provider.getModels(),
+      auth: {
+        apiKey: {
+          name: 'ChatGPT plan',
+          check: () =>
+            Promise.resolve(
+              subscription.snapshot() ? { type: 'oauth', source: 'ChatGPT' } : undefined,
+            ),
+          async resolve({ signal }) {
+            const current = subscription.snapshot()
+            if (!current) throw new ModelError('auth_required')
+            return {
+              auth: { apiKey: await subscription.token(current.connectionId, signal) },
+              source: 'ChatGPT',
+            }
+          },
+        },
+      },
+    })
+  }
+  const requestedProvider = subscription ? 'openai' : (options.provider ?? process.env.PI_PROVIDER)
   const requestedModel = options.model ?? process.env.PI_MODEL
   const available = runtime.getAvailableSnapshot()
-  const model = available.find(
+  const initialModel = available.find(
     (candidate) =>
       (!requestedProvider || candidate.provider === requestedProvider) &&
       (!requestedModel || candidate.id === requestedModel),
   )
+  const selectedModel = () => {
+    if (!subscription) return initialModel
+    const selected = subscription.snapshot()
+    return selected ? runtime.getPhysicalModel('openai', selected.modelId) : undefined
+  }
   const active = new Map<string, AgentSession>()
   let closed = false
 
   return {
     meta() {
+      const model = selectedModel()
+      const connection = subscription?.snapshot()
       return Promise.resolve<EngineInfo>({
         engine: 'pi',
         model: {
@@ -69,12 +108,18 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
         },
         configured: Boolean(model),
         capabilities: { tools: false },
+        ...(subscription ? { authMode: 'chatgpt' as const } : {}),
+        ...(connection ? { connectionId: connection.connectionId } : {}),
       })
     },
     async run(input) {
       if (closed) throw new Error('模型服务已关闭')
       input.signal.throwIfAborted()
+      const model = selectedModel()
+      if (subscription && input.connectionId !== subscription.snapshot()?.connectionId)
+        throw new ModelError('connection_changed')
       if (!model) {
+        if (subscription) throw new ModelError('auth_required')
         throw new Error(
           '未配置可用模型。请在服务端设置 PI_PROVIDER、PI_MODEL 和对应提供商的 API_KEY。',
         )
@@ -106,6 +151,7 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
       }
       active.set(input.conversationId, session)
       let responseFailed = false
+      let failureCode: ModelErrorCode = 'provider_failed'
       const unsubscribe = session.subscribe((event) => {
         if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
           input.onDelta(event.assistantMessageEvent.delta)
@@ -113,7 +159,19 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
         if (event.type === 'message_end' && event.message.role === 'assistant') {
           // Context overflow can fail an attempt before compaction recovers it.
           responseFailed =
-            event.message.stopReason === 'error' || event.message.stopReason === 'aborted'
+            event.message.stopReason === 'error' ||
+            event.message.stopReason === 'aborted' ||
+            Boolean(subscription && event.message.stopReason !== 'stop')
+          if (responseFailed && subscription) {
+            const detail = event.message.errorMessage ?? ''
+            if (/subscription_sharing_usage_limit_exceeded|usage limit/.test(detail))
+              failureCode = 'quota_exceeded'
+            else if (/subscription_sharing_invalid_user|授权已失效/.test(detail))
+              failureCode = 'auth_required'
+            else if (/chatpass_v2_scope_not_authorized|尚未获得/.test(detail))
+              failureCode = 'permission_missing'
+            else if (/model_not_found/.test(detail)) failureCode = 'model_unavailable'
+          }
         }
       })
       const abort = (): void => {
@@ -126,13 +184,17 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
         await session.waitForIdle()
         input.signal.throwIfAborted()
         if (closed) throw new Error('模型服务已关闭')
-        if (responseFailed) throw new Error('provider_failed')
+        if (responseFailed) throw new ModelError(failureCode)
         return { text: session.getLastAssistantText() ?? '' }
       } catch (error) {
         if (input.signal.aborted) throw error
+        if (subscription && error instanceof ModelError) {
+          await subscription.failed(error.code)
+          throw error
+        }
         // Provider errors can contain request headers, keys, and endpoint details.
         // The public application error remains independent of provider internals.
-        throw new Error('模型请求失败，请检查服务端模型配置、凭证、额度与网络。', { cause: error })
+        throw new ModelError('provider_failed', { cause: error })
       } finally {
         input.signal.removeEventListener('abort', abort)
         unsubscribe()

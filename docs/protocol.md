@@ -5,6 +5,7 @@
 ## 通用约定
 
 - 客户端先读取 `GET /api/v1/meta`，检查 `apiVersion === API_VERSION`，再使用 `configured`、`model` 和 `capabilities` 展示模型状态。当前 `API_VERSION` 为 `1`。`configured` 由本地模型与凭据配置决定；远端鉴权、额度和网络问题在执行时报告。
+- ChatGPT 模式额外返回 `authMode: "chatgpt"`。登录、连接与模型更新后重新读取 `/meta`；该接口不触发远端调用。未登录、缺少计划权限、未选可用模型或连接更新中时 `configured=false`。
 - `capabilities` 只声明 `tools`，尚未实现版本范围或完整能力协商，不保证跨版本旧客户端兼容。
 - 后端仅监听回环地址，校验精确的 Host、Origin 白名单与 `Authorization: Bearer <token>`。通过 Host/Origin 检查的 `OPTIONS` 预检返回 `204`，无需 Bearer。
 - Web 的代理、Electron 的主进程代理负责注入 Bearer，renderer 无需保存令牌或模型密钥。直接调用后端的其他客户端自行携带 Bearer。
@@ -29,6 +30,29 @@
 | POST   | `/conversations/:id/runs` | `{ "message": "问题", "requestId": "request-0001" }` | `202 Run`                  |
 | GET    | `/runs/:id/events`        | 无                                                   | `200 text/event-stream`    |
 | POST   | `/runs/:id/cancel`        | 无需正文                                             | `200 Run`                  |
+
+### ChatGPT 连接与模型
+
+类型与校验见 [contracts/chatgpt](../packages/contracts/src/chatgpt.ts)。这些业务接口均需要现有本地服务鉴权，路径仍省略 `/api/v1`。
+
+| 方法   | 路径                       | 正文                                    | 成功响应                         |
+| ------ | -------------------------- | --------------------------------------- | -------------------------------- |
+| GET    | `/auth/chatgpt`            | 无                                      | `200 ChatGPTState`               |
+| POST   | `/auth/chatgpt/login`      | `{}` 或 `{ "profileId": "已保存连接" }` | `201 ChatGPTLogin`               |
+| GET    | `/auth/chatgpt/logins/:id` | 无                                      | `200 ChatGPTLogin`               |
+| DELETE | `/auth/chatgpt/logins/:id` | 无                                      | `204`                            |
+| POST   | `/auth/chatgpt/select`     | `{ "profileId": "连接" }`               | `200 ChatGPTState`               |
+| POST   | `/auth/chatgpt/logout`     | 无需正文                                | `200 { "revoked": true或false }` |
+| GET    | `/models`                  | 无                                      | `200 ChatGPTModel[]`             |
+| PUT    | `/model`                   | `{ "modelId": "模型" }`                 | `200 ServiceMeta`                |
+
+环境密钥或 mock 模式下，状态接口返回 `enabled=false`，其他连接/模型操作返回 `409 auth_mode_disabled`。登录请求返回不含 token 的浏览器授权地址，客户端轮询进度；进度有 `pending`、`completed`、`cancelled`、`expired`、`failed`。每次仅一个登录尝试，默认十五分钟超时，进程退出会取消它。状态接口通过可选 `pendingLogin` 返回进行中的登录，刷新页面或更换标签后可恢复轮询、重新打开授权页或取消；终态结果只保留到下一次尝试。
+
+服务重启或旧登录被新尝试替换后，查询、取消旧登录可能返回 `404 login_not_found`。客户端将其视为旧尝试已结束，停止旧轮询并重新读取连接、模型和服务状态，无需刷新页面即可重新登录；取消操作遇到相同错误也按已结束处理。轮询遇到临时网络或服务错误仍保留进度并重试。
+
+连接状态区分 `signed_out`、`connected`、`reauth_required`，`planUsage` 表示实际授予的计划使用权限。已登录但 `planUsage=false` 时仍保留身份，客户端可重新授权。授权与 Token 交换在后端进行，HTTP DTO 不含令牌。`GET /models` 优先使用账户目录缓存，缓存为空时尝试拉取；`?refresh=1` 显式刷新，与 Pi 支持范围取交集，空列表不代表认证失败。
+
+生成中更改连接、模型或开始授权返回 `409 connection_busy`；退出登录会先取消所有生成，再等待刷新并尝试撤销远程会话。`revoked=false` 表示本地令牌已清除，远程撤销未确认，应引导用户查看 ChatGPT 设置。历史记录不会随退出删除。
 
 ### 参数约束
 
@@ -61,6 +85,8 @@ POST 响应或后续快照丢失时，客户端重试同一次提交应复用原
 每个会话只允许一个活动任务，其他新提交返回 `409 conversation_busy`；不同会话可各自生成。删除中的会话也拒绝新任务。
 
 引擎未配置时仍可读取历史，但新任务返回 `503`，不会自动改用 mock。
+
+会话首次生成时绑定当前模型连接；旧数据已有历史的会话归属环境密钥模式。切换到其他连接后继续生成返回 `409 connection_changed`，不写入消息、不调用模型。原 requestId 的幂等查询仍优先返回原任务。ChatGPT 请求不回退到环境 API Key，成功必须有完整的模型终止事件，截断或失败流保留部分文本并标记失败。
 
 ### 状态与取消
 
@@ -148,7 +174,7 @@ data: {"apiVersion":1,"conversationId":"conversation-id","runId":"run-id","seque
 | 503       | `engine_not_configured`、`storage_unavailable`、`shutting_down` |
 | 500       | `internal_error`                                                |
 
-任务被接收后发生的模型失败通过 `Run.status = failed` 与 `Run.error` 表达，不会把已返回的 `202` 改成 HTTP 错误。SSE 响应头已经发送后发生错误会关闭连接，不再追加 JSON 错误正文。
+任务被接收后发生的模型失败通过 `Run.status = failed` 与 `Run.error` 表达，不会把已返回的 `202` 改成 HTTP 错误。可识别的模型错误还返回可选 `Run.errorCode`：`auth_required`、`permission_missing`、`quota_exceeded`、`model_unavailable`、`connection_changed`、`provider_failed`。公开文本始终脱敏，客户端不依赖中文原文控制业务。SSE 响应头已经发送后发生错误会关闭连接，不再追加 JSON 错误正文。
 
 桌面主进程代理连接不到后端时，另返回 `503 SERVICE_UNAVAILABLE`。客户端统一保留 HTTP 状态、错误 code 和显示消息；代理返回非 JSON 错误页时使用状态码提示。错误消息用于显示，不应依赖其中文原文控制业务。
 

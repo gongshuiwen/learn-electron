@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell } from 'electron'
+import { isChatGPTUrl } from '@learn-electron/contracts/native'
 import type { IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { IPC_CHANNELS } from '../shared/ipc'
@@ -161,6 +162,11 @@ app
     ipcMain.handle(IPC_CHANNELS.setTheme, (event, source: unknown) => {
       validateSender(event)
       return setTheme(source)
+    })
+    ipcMain.handle(IPC_CHANNELS.openChatGPTUrl, async (event, value: unknown) => {
+      validateSender(event)
+      if (!isChatGPTUrl(value)) throw new Error('不允许的 ChatGPT 地址')
+      await shell.openExternal(value)
     })
     createApplicationMenu()
     backend = await startBackend()

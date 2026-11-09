@@ -6,6 +6,48 @@ import { pathToFileURL } from 'node:url'
 import { desktopFixture, root } from '../helpers/electron.mjs'
 
 test(
+  'ChatGPT browser bridge opens only allowed destinations and preserves the restricted renderer',
+  { timeout: 30000 },
+  async (t) => {
+    const { launch } = await desktopFixture(t, 'chatgpt-browser')
+    const desktop = await launch()
+    const page = await desktop.firstWindow()
+    await page.locator('#root > *').first().waitFor()
+    await desktop.evaluate(({ shell }) => {
+      process.chatgptOpened = []
+      shell.openExternal = async (url) => {
+        process.chatgptOpened.push(url)
+      }
+    })
+    await page.evaluate(() =>
+      window.electronAPI.openChatGPTUrl('https://chatgpt.com/settings/usage'),
+    )
+    for (const url of [
+      'https://evil.example',
+      'file:///C:/Windows',
+      'https://chatgpt.com.evil.example/settings/usage',
+    ])
+      await assert.rejects(
+        page.evaluate((value) => window.electronAPI.openChatGPTUrl(value), url),
+        /不允许/,
+      )
+    assert.deepEqual(await desktop.evaluate(() => process.chatgptOpened), [
+      'https://chatgpt.com/settings/usage',
+    ])
+    assert.equal(page.url().startsWith('app://desktop/'), true)
+    const result = await page.evaluate(async () => {
+      const response = await fetch(`${window.electronAPI.apiBaseUrl}/api/v1/model`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelId: 'model' }),
+      })
+      return { status: response.status, code: (await response.json()).error.code }
+    })
+    assert.deepEqual(result, { status: 409, code: 'auth_mode_disabled' })
+  },
+)
+
+test(
   'Application menu exposes native settings, logs and development update feedback',
   { timeout: 30000 },
   async (t) => {

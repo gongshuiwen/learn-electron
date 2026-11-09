@@ -12,8 +12,9 @@
     "test": "node --import tsx --test test/*.test.mjs"
   },
   "dependencies": {
-    "@learn-electron/contracts": "*",
     "@learn-electron/agent-runtime": "*",
+    "@learn-electron/contracts": "*",
+    "jose": "6.2.16",
     "proper-lockfile": "4.1.2"
   },
   "devDependencies": {

@@ -13,7 +13,8 @@ import type {
   RunEvent,
   ServiceMeta,
 } from '@learn-electron/contracts'
-import { ApiRequestError, ProtocolError, readRunEvents, reconnectDelay, request } from './api'
+import { readRunEvents, reconnectDelay } from './api'
+import { ApiRequestError, ProtocolError, request } from '@/lib/api'
 
 const selectionKey = 'learn-electron.chat.selection.v1'
 
@@ -98,6 +99,11 @@ export function useChat() {
   const submission = useRef<{ conversationId: string; message: string; requestId: string } | null>(
     null,
   )
+
+  const refreshMeta = useCallback(async () => {
+    const service = await request('/meta', parseServiceMeta)
+    if (alive.current) setMeta(service)
+  }, [])
 
   const selectConversation = useCallback((id: string | null) => {
     if (id === selectedRef.current) return
@@ -359,5 +365,6 @@ export function useChat() {
       setReload((value) => value + 1)
     },
     reconnect: () => setReconnect((value) => value + 1),
+    refreshMeta,
   }
 }
