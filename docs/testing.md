@@ -13,9 +13,10 @@ Web 界面测试使用 Playwright 和本机 Chrome，可用 `PLAYWRIGHT_CHANNEL=
 | 指定工作区（以 server 为例） | `npm test --workspace @learn-electron/server` |
 | 全部工作区测试               | `npm test`                                    |
 | 全仓库静态检查               | `npm run check`                               |
-| 桌面启动与聊天链路           | `npm run test:smoke`                          |
+| 桌面冒烟与完整集成测试       | `npm run test:desktop`                        |
+| 桌面启动与聊天链路           | `npm run test:desktop:smoke`                  |
 
-CI 执行完整桌面集成测试。其他测试命令见 [根脚本](../package.json)与各工作区的 `package.json`。
+CI 使用 `npm run test:desktop` 执行桌面冒烟与完整集成测试。根目录的桌面测试入口统一使用 `test:desktop` 前缀，转发到桌面工作区的 `test`、`test:smoke` 和 `test:packaged`；工作区的准备钩子会自动执行。其他测试命令见 [根脚本](../package.json)与各工作区的 `package.json`。
 
 ## 单文件测试
 
@@ -57,7 +58,7 @@ Pi 代理回归使用独立 Node 进程和真实本地 HTTP 代理，验证 SDK 
 发布前需在 Windows 显式运行以下命令；该验证不在常规 `npm test` 或 CI 中：
 
 ```powershell
-npm run test:packaged
+npm run test:desktop:packaged
 ```
 
-该命令通过 `pretest:packaged` 准备 `win-unpacked` 应用，并复制到仓库外，验证无系统 Node 的运行、历史恢复、后台进程清理、生产 Pi 依赖的离线加载，以及 ChatGPT 模式的 `jose`、Windows 凭证目录权限和登录入口；NSIS 安装/卸载、签名和更新按任务需要另行验证。
+该命令通过桌面工作区的 `pretest:packaged` 准备 `win-unpacked` 应用，并复制到仓库外，验证无系统 Node 的运行、历史恢复、后台进程清理、生产 Pi 依赖的离线加载，以及 ChatGPT 模式的 `jose`、Windows 凭证目录权限和登录入口；NSIS 安装/卸载、签名和更新按任务需要另行验证。

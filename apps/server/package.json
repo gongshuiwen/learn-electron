@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "npm run dev:server --prefix ../..",
     "start": "npm run start:server --prefix ../..",
-    "build": "npm run build:server --prefix ../..",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "npm run build:server --prefix ../..",
     "pretest": "npm run typecheck",
     "test": "node --import tsx --test test/*.test.mjs"
   },

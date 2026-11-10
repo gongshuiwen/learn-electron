@@ -81,6 +81,8 @@ ChatGPT 凭证只保存在所选后端数据目录的 `chatgpt/connections.json`
 npm run dev
 ```
 
+根目录的 `dev`、`build` 和 `preview` 默认面向桌面；独立 Web 和后端使用带 `:web`、`:server` 后缀的入口。全仓库静态检查和工作区测试分别使用 `npm run check`、`npm test`。
+
 开发桌面读取项目根目录 `.env`；安装版本只继承启动环境，设置 Pi 模型环境变量后再启动。开发需要 Node，安装后的应用自带 Node，无需系统 Node 或全局 pi。
 
 开发时后端源码变化会自动重建并重启应用，界面支持热更新。开发启动不执行类型检查，使用 `npm run check` 或 `npm run build` 验证类型。

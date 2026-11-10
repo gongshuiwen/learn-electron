@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "npm run dev:web --prefix ../..",
-    "build": "npm run build:web --prefix ../..",
     "typecheck": "tsc --noEmit -p ../../tsconfig.web.json",
+    "build": "npm run build:web --prefix ../..",
     "pretest": "npm run build",
     "test": "node --import tsx --test test/*.test.mjs"
   },
