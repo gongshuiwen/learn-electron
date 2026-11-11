@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
-import { ChatGPTOAuth, CHATGPT_SCOPE } from '../../src/chatgpt/oauth.ts'
+import { ChatGPTOAuth, CHATGPT_SCOPE } from '@learn-electron/chatgpt-auth'
 import { getOpenAIModels } from '@learn-electron/agent-runtime'
 
 export async function oauthFixture(t) {

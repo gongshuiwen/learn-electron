@@ -14,10 +14,12 @@ function backendDevBuild(): Plugin {
       for (const source of [
         './apps/server/src',
         './packages/agent-runtime/src',
+        './packages/chatgpt-auth/src',
         './packages/contracts/src',
         './packages/model-connections/src',
         './apps/server/package.json',
         './packages/agent-runtime/package.json',
+        './packages/chatgpt-auth/package.json',
         './scripts/build-server.mjs',
         './scripts/server-dependencies.mjs',
       ]) {

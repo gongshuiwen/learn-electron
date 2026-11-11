@@ -171,8 +171,8 @@ export async function startBackend(): Promise<Backend> {
 async function stopChild(child: ChildProcess, force = false): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return
   await new Promise<void>((resolve) => {
-    // A rotating OAuth refresh must finish its bounded request and persist before exit.
-    const grace = 30_000
+    // Allow bounded OAuth refresh, discovery and revocation to finish before the fallback.
+    const grace = 60_000
     const timer = setTimeout(() => child.kill('SIGKILL'), grace)
     timer.unref()
     child.once('exit', () => {

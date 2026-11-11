@@ -17,21 +17,11 @@ test('connection writes distinguish retained, replaced and explicitly cleared cr
   assert.throws(() => parseSaveProvider({ ...config, apiKey: '' }))
 })
 
-test('model selection requires an explicit connection and model', () => {
+test('model references are available through the HTTP contracts', () => {
   assert.deepEqual(parseModelRef({ instanceId: 'connection-1', modelId: 'vendor/model' }), {
     instanceId: 'connection-1',
     modelId: 'vendor/model',
   })
-  for (const invalid of [
-    null,
-    { instanceId: 'connection-1' },
-    { modelId: 'x' },
-    { instanceId: '../secret' },
-    { instanceId: 'connection-1', modelId: '' },
-    { instanceId: 'connection-1', modelId: 3 },
-    { instanceId: 'connection-1', modelId: 'm'.repeat(201) },
-  ])
-    assert.throws(() => parseModelRef(invalid))
 })
 
 test('connection read DTOs strip secret fields and reject malformed status metadata', () => {

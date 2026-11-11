@@ -86,12 +86,18 @@
               {
                 "group": [
                   "node:*",
+                  "node:*/**",
                   "electron",
-                  "electron/*",
-                  "@earendil-works/*",
+                  "electron/**",
+                  "@earendil-works/**",
                   "@learn-electron/server",
+                  "@learn-electron/server/**",
                   "@learn-electron/agent-runtime",
+                  "@learn-electron/agent-runtime/**",
+                  "@learn-electron/chatgpt-auth",
+                  "@learn-electron/chatgpt-auth/**",
                   "@learn-electron/desktop",
+                  "@learn-electron/desktop/**",
                   "**/apps/**",
                   "**/packages/**"
                 ],
@@ -112,13 +118,16 @@
               {
                 "group": [
                   "electron",
-                  "electron/*",
+                  "electron/**",
                   "react",
+                  "react/**",
                   "react-dom",
-                  "react-dom/*",
-                  "@earendil-works/*",
+                  "react-dom/**",
+                  "@earendil-works/**",
                   "@learn-electron/web",
+                  "@learn-electron/web/**",
                   "@learn-electron/desktop",
+                  "@learn-electron/desktop/**",
                   "**/apps/**",
                   "**/packages/**"
                 ],
@@ -139,16 +148,82 @@
               {
                 "group": [
                   "react",
+                  "react/**",
                   "react-dom",
-                  "react-dom/*",
-                  "@earendil-works/*",
+                  "react-dom/**",
+                  "@earendil-works/**",
                   "@learn-electron/server",
+                  "@learn-electron/server/**",
                   "@learn-electron/agent-runtime",
+                  "@learn-electron/agent-runtime/**",
+                  "@learn-electron/chatgpt-auth",
+                  "@learn-electron/chatgpt-auth/**",
                   "@learn-electron/web",
+                  "@learn-electron/web/**",
                   "**/apps/**",
                   "**/packages/**"
                 ],
                 "message": "桌面宿主只集成原生能力及后端进程，不导入前后端业务实现。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/server/src/model-service.ts", "apps/server/src/chat-service.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "electron",
+                  "electron/**",
+                  "react",
+                  "react/**",
+                  "react-dom",
+                  "react-dom/**",
+                  "@earendil-works/**",
+                  "@learn-electron/web",
+                  "@learn-electron/web/**",
+                  "@learn-electron/desktop",
+                  "@learn-electron/desktop/**",
+                  "@learn-electron/chatgpt-auth",
+                  "@learn-electron/chatgpt-auth/**",
+                  "./chatgpt/**",
+                  "**/apps/**",
+                  "**/packages/**"
+                ],
+                "message": "会话和模型编排通过接口使用认证能力，不依赖具体认证实现。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/chatgpt-auth/src/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "electron",
+                  "electron/**",
+                  "react",
+                  "react/**",
+                  "react-dom",
+                  "react-dom/**",
+                  "@earendil-works/**",
+                  "@learn-electron/**",
+                  "**/apps/**",
+                  "**/packages/**"
+                ],
+                "message": "ChatGPT 认证不依赖 Pi、模型连接、HTTP 契约或应用实现。"
               }
             ]
           }
@@ -165,11 +240,12 @@
               {
                 "group": [
                   "electron",
-                  "electron/*",
+                  "electron/**",
                   "react",
+                  "react/**",
                   "react-dom",
-                  "react-dom/*",
-                  "@learn-electron/*",
+                  "react-dom/**",
+                  "@learn-electron/**",
                   "**/apps/**",
                   "**/contracts/**",
                   "!@learn-electron/model-connections"
@@ -191,13 +267,15 @@
               {
                 "group": [
                   "node:*",
+                  "node:*/**",
                   "electron",
-                  "electron/*",
+                  "electron/**",
                   "react",
+                  "react/**",
                   "react-dom",
-                  "react-dom/*",
-                  "@earendil-works/*",
-                  "@learn-electron/*",
+                  "react-dom/**",
+                  "@earendil-works/**",
+                  "@learn-electron/**",
                   "**/apps/**",
                   "!@learn-electron/model-connections"
                 ],
@@ -218,13 +296,15 @@
               {
                 "group": [
                   "node:*",
+                  "node:*/**",
                   "electron",
-                  "electron/*",
+                  "electron/**",
                   "react",
+                  "react/**",
                   "react-dom",
-                  "react-dom/*",
-                  "@earendil-works/*",
-                  "@learn-electron/*",
+                  "react-dom/**",
+                  "@earendil-works/**",
+                  "@learn-electron/**",
                   "**/apps/**"
                 ],
                 "message": "模型连接核心保持纯 TypeScript，不依赖 SDK、应用或平台。"

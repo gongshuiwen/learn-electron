@@ -2,25 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { isRecord } from '@learn-electron/contracts'
 import { parseChatGPTModels } from '@learn-electron/contracts/chatgpt'
-import type { ChatGPTModel } from '@learn-electron/contracts/chatgpt'
-import type { Tokens } from './oauth.ts'
+import type { SavedConnections, Tokens } from '@learn-electron/chatgpt-auth'
 import { ProtectedFile } from '../protected-file.ts'
-
-export interface SavedProfile {
-  id: string
-  clientId?: string
-  subject?: string
-  email?: string
-  tokens?: Tokens
-  reauth?: boolean
-  models: ChatGPTModel[]
-}
-
-export interface SavedConnections {
-  version: 2
-  hostId: string
-  profiles: SavedProfile[]
-}
 
 function validTokens(value: unknown): value is Tokens {
   return (

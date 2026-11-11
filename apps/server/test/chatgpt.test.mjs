@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { Server } from 'node:http'
-import { setTimeout as delay } from 'node:timers/promises'
+import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
-import { ChatGPTConnectionService } from '../src/chatgpt/connection-service.ts'
+import { ChatGPTProvider } from '../src/chatgpt/provider.ts'
 import { ConnectionStorage } from '../src/chatgpt/storage.ts'
 import { getOpenAIModels } from '@learn-electron/agent-runtime'
 import { oauthFixture } from './helpers/chatgpt.mjs'
@@ -20,7 +20,7 @@ async function fixture(t) {
     oauth: remote.oauth,
     isBusy: () => busy,
   }
-  let service = await ChatGPTConnectionService.create(options)
+  let service = await ChatGPTProvider.create(options)
   t.after(async () => {
     await service.close()
     assert.equal(dirname(resolve(dataDir)), resolve(tmpdir()))
@@ -40,7 +40,7 @@ async function fixture(t) {
     },
     async reopen() {
       await service.close()
-      service = await ChatGPTConnectionService.create(options)
+      service = await ChatGPTProvider.create(options)
       return service
     },
   }
@@ -103,8 +103,15 @@ test('login persists a separate registration, exposes no secrets and resumes wit
   assert.doesNotMatch(JSON.stringify(state), /plan-access|plan-refresh|idToken|clientId/)
   const stored = JSON.parse(await readFile(join(f.dataDir, 'chatgpt/connections.json'), 'utf8'))
   assert.ok(stored.profiles[0].tokens.refreshToken)
+  assert.ok(stored.profiles[0].models.some((model) => model.id === 'unknown-to-pi'))
+  // Earlier v2 files cached only models supported by the runtime.
+  stored.profiles[0].models = stored.profiles[0].models.filter(
+    (model) => model.id === f.remote.modelId,
+  )
+  await new ConnectionStorage(f.dataDir).save(stored)
   await f.reopen()
   assert.deepEqual(f.service.status(), state)
+  assert.equal(f.service.model(f.id, f.remote.modelId).id, f.remote.modelId)
   const repeat = await f.service.beginLogin(f.id)
   const repeatedParams = new URL(repeat.authorizationUrl).searchParams
   assert.equal(repeatedParams.get('client_id'), stored.profiles[0].clientId)
@@ -504,6 +511,84 @@ test(
     assert.equal(f.service.status().profiles.find(({ id }) => id === secondId).status, 'connected')
     assert.equal((await new ConnectionStorage(f.dataDir).load()).profiles.length, 3)
     assert.equal(f.service.status().pendingLogin, undefined)
+  },
+)
+
+test(
+  'closing waits for logout to stop work, revoke and persist before reopening',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await fixture(t)
+    await login(f)
+    const firstId = f.id
+    f.remote.subject = 'another-user'
+    await login(f)
+    const secondId = f.id
+    const secondToken = await f.service.token(secondId, t.signal)
+    const stopping = Promise.withResolvers()
+    const revoking = Promise.withResolvers()
+    const finishRevocation = Promise.withResolvers()
+    const saving = Promise.withResolvers()
+    const finishSaving = Promise.withResolvers()
+    const revoke = f.remote.oauth.revoke.bind(f.remote.oauth)
+    t.mock.method(f.remote.oauth, 'revoke', async (...args) => {
+      revoking.resolve()
+      await finishRevocation.promise
+      return revoke(...args)
+    })
+    const save = ConnectionStorage.prototype.save
+    t.mock.method(ConnectionStorage.prototype, 'save', async function (state) {
+      if (!state.profiles.find(({ id }) => id === firstId)?.tokens) {
+        saving.resolve()
+        await finishSaving.promise
+      }
+      return save.call(this, state)
+    })
+    const release = () => {
+      stopping.resolve()
+      finishRevocation.resolve()
+      finishSaving.resolve()
+    }
+    t.signal.addEventListener('abort', release, { once: true })
+    let closed = false
+    const logout = f.service.logout(firstId, () => stopping.promise)
+    const closing = f.service.close().then(() => {
+      closed = true
+    })
+    try {
+      await nextTurn()
+      assert.equal(closed, false, 'close must wait for active tasks to stop')
+      stopping.resolve()
+      await Promise.race([
+        revoking.promise,
+        logout.then(() => {
+          throw new Error('revocation not started')
+        }),
+      ])
+      await nextTurn()
+      assert.equal(closed, false, 'close must wait for remote revocation')
+      finishRevocation.resolve()
+      await Promise.race([
+        saving.promise,
+        logout.then(() => {
+          throw new Error('logout not saved')
+        }),
+      ])
+      await nextTurn()
+      assert.equal(closed, false, 'close must wait for credential persistence')
+      finishSaving.resolve()
+      assert.deepEqual(await logout, { revoked: true })
+      await closing
+    } finally {
+      release()
+      await Promise.allSettled([logout, closing])
+    }
+    await f.reopen()
+    const newId = await f.service.createProfile()
+    const saved = await new ConnectionStorage(f.dataDir).load()
+    assert.equal(saved.profiles.find(({ id }) => id === firstId).tokens, undefined)
+    assert.equal(saved.profiles.find(({ id }) => id === secondId).tokens.accessToken, secondToken)
+    assert.ok(saved.profiles.some(({ id }) => id === newId))
   },
 )
 

@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { setTimeout as delay } from 'node:timers/promises'
+import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
+import { ChatGPTOAuth, PLAN_SCOPE } from '@learn-electron/chatgpt-auth'
 import { startServer } from '../src/server.ts'
+import { ChatService } from '../src/chat-service.ts'
+import { ConnectionStorage } from '../src/chatgpt/storage.ts'
 import { ProtectedFile } from '../src/protected-file.ts'
 import { oauthFixture } from './helpers/chatgpt.mjs'
 
@@ -373,5 +376,105 @@ test(
     assert.equal((await missingPermission.json()).error.code, 'permission_missing')
     accountsAfterProbe = (await (await request('/model-providers')).json()).instances
     assert.equal(accountsAfterProbe.find(({ id }) => id === fourthId).planUsage, false)
+  },
+)
+
+test(
+  'server shutdown waits for logout before allowing a new owner to save accounts',
+  { timeout: 30_000 },
+  async (t) => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'learn-electron-logout-close-'))
+    const stopping = Promise.withResolvers()
+    const stopEntered = Promise.withResolvers()
+    const revoking = Promise.withResolvers()
+    const finishRevocation = Promise.withResolvers()
+    let backend, logout, closing
+    let starting = Promise.resolve()
+    const release = () => {
+      stopping.resolve()
+      finishRevocation.resolve()
+    }
+    t.signal.addEventListener('abort', release, { once: true })
+    t.after(async () => {
+      release()
+      await Promise.allSettled([starting, logout, closing])
+      await backend?.close()
+      assert.equal(dirname(resolve(dataDir)), resolve(tmpdir()))
+      await rm(dataDir, { recursive: true, force: true, maxRetries: 5 })
+    })
+    const storage = new ConnectionStorage(dataDir)
+    const state = await storage.load()
+    const firstId = crypto.randomUUID()
+    const secondId = crypto.randomUUID()
+    const tokens = (accessToken) => ({
+      accessToken,
+      refreshToken: `refresh-${accessToken}`,
+      expiresAt: Date.now() + 300_000,
+      scopes: [PLAN_SCOPE],
+    })
+    state.profiles.push(
+      { id: firstId, clientId: 'first-client', tokens: tokens('first'), models: [] },
+      { id: secondId, clientId: 'second-client', tokens: tokens('second'), models: [] },
+    )
+    await storage.save(state)
+    const oauth = new ChatGPTOAuth()
+    t.mock.method(ChatService.prototype, 'cancelAll', async () => {
+      stopEntered.resolve()
+      await stopping.promise
+    })
+    t.mock.method(oauth, 'revoke', async () => {
+      revoking.resolve()
+      await finishRevocation.promise
+    })
+    const options = { token: 'test-local-service-token', dataDir, chatgptOAuth: oauth }
+    starting = startServer(options).then((server) => {
+      backend = server
+    })
+    await starting
+    const request = (path, method = 'GET', body) =>
+      fetch(`${backend.url}/api/v1${path}`, {
+        method,
+        signal: t.signal,
+        headers: {
+          Authorization: `Bearer ${options.token}`,
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      })
+    logout = request(`/model-providers/${firstId}/auth/logout`, 'POST').catch(() => undefined)
+    await stopEntered.promise
+    let closed = false
+    closing = backend.close().then(() => {
+      closed = true
+    })
+    try {
+      await nextTurn()
+      assert.equal(closed, false)
+      stopping.resolve()
+      await Promise.race([
+        revoking.promise,
+        logout.then(() => {
+          throw new Error('logout ended before revocation')
+        }),
+      ])
+      await nextTurn()
+      assert.equal(closed, false)
+      finishRevocation.resolve()
+      await closing
+      await logout
+      backend = undefined
+      starting = startServer(options).then((server) => {
+        backend = server
+      })
+      await starting
+      const result = await (await request('/model-providers', 'POST', { kind: 'chatgpt' })).json()
+      const newId = result.instances.at(-1).id
+      const saved = await storage.load()
+      assert.equal(saved.profiles.find(({ id }) => id === firstId).tokens, undefined)
+      assert.equal(saved.profiles.find(({ id }) => id === secondId).tokens.accessToken, 'second')
+      assert.ok(saved.profiles.some(({ id }) => id === newId))
+    } finally {
+      release()
+    }
   },
 )

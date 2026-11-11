@@ -9,6 +9,7 @@ flowchart LR
   Web[apps/web] --> Contracts[packages/contracts]
   Server[apps/server] --> Contracts
   Server --> Runtime[packages/agent-runtime]
+  Server --> ChatGPTAuth[packages/chatgpt-auth]
   Desktop[apps/desktop] --> Contracts
   Contracts --> Connections[packages/model-connections]
   Server --> Connections
@@ -18,14 +19,15 @@ flowchart LR
 
 箭头表示源码依赖。桌面通过进程和 HTTP 使用后端产物，不导入后端业务实现；它直接使用的共享契约只有 [contracts/native](../packages/contracts/src/native.ts)，桥接实现见 [preload](../apps/desktop/preload/index.ts)。
 
-| 模块                         | 职责                                                   | 主要边界                                                     |
-| ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------ |
-| `apps/web`                   | React 界面、聊天视图状态、HTTP/SSE 客户端和平台适配    | 不导入 Node、Electron 或 Pi；平台适配屏蔽原生桥              |
-| `apps/server`                | 鉴权、HTTP/SSE、会话编排、SQLite、ChatGPT OAuth 与凭证 | 不依赖 Electron、React 或 Pi 类型，通过 AgentEngine 调用模型 |
-| `apps/desktop`               | 窗口和系统集成、后端监管、静态资源与 API 代理          | preload 暴露 API 基地址、主题及受限 ChatGPT 浏览器入口       |
-| `packages/agent-runtime`     | AgentEngine、Pi 适配、显式 mock 引擎                   | 不依赖 HTTP 协议或应用模块，不暴露 Pi 类型给应用             |
-| `packages/model-connections` | 实例配置、模型引用、执行目标与纯校验                   | 无 SDK、HTTP、Node 或应用依赖                                |
-| `packages/contracts`         | HTTP 类型与校验、最小原生桥契约                        | 纯 TypeScript，无应用或运行时实现依赖                        |
+| 模块                         | 职责                                                | 主要边界                                                     |
+| ---------------------------- | --------------------------------------------------- | ------------------------------------------------------------ |
+| `apps/web`                   | React 界面、聊天视图状态、HTTP/SSE 客户端和平台适配 | 不导入 Node、Electron 或 Pi；平台适配屏蔽原生桥              |
+| `apps/server`                | 鉴权、HTTP/SSE、会话编排、SQLite、模型与认证适配    | 不依赖 Electron、React 或 Pi 类型，通过 AgentEngine 调用模型 |
+| `apps/desktop`               | 窗口和系统集成、后端监管、静态资源与 API 代理       | preload 暴露 API 基地址、主题及受限 ChatGPT 浏览器入口       |
+| `packages/agent-runtime`     | AgentEngine、Pi 适配、显式 mock 引擎                | 不依赖 HTTP 协议或应用模块，不暴露 Pi 类型给应用             |
+| `packages/chatgpt-auth`      | ChatGPT OAuth、账户状态、令牌刷新与撤销             | 不依赖 Pi、HTTP 契约、模型连接或应用，通过接口接收存储       |
+| `packages/model-connections` | 实例配置、模型引用、执行目标与纯校验                | 无 SDK、HTTP、Node 或应用依赖                                |
+| `packages/contracts`         | HTTP 类型与校验、最小原生桥契约                     | 纯 TypeScript，无应用或运行时实现依赖                        |
 
 后端按职责拆分文件，直接注入 Store：
 
@@ -34,7 +36,7 @@ flowchart LR
 - [Store](../apps/server/src/store.ts)：执行数据库操作、事务、序号更新与未完成任务恢复。
 - [AgentEngine](../packages/agent-runtime/src/index.ts)：提供引擎信息、执行、上下文删除和关闭能力；取消通过 `AbortSignal`，文本增量通过 `onDelta`；HTTP 版本由服务端添加。
 - [ModelService](../apps/server/src/model-service.ts)：管理供应商实例与新会话默认选择，统一列出端点与 ChatGPT 账号；按会话选择解析具体目标，通过核心包的 CredentialResolver 提供按实例隔离的请求凭据。
-- [ChatGPTConnectionService](../apps/server/src/chatgpt/connection-service.ts)：按账户 ID 管理授权、令牌刷新、目录缓存、失败状态与退出，不持有当前账户或所选模型；[oauth.ts](../apps/server/src/chatgpt/oauth.ts) 处理 OAuth/OIDC 协议和 JWKS 验签，[storage.ts](../apps/server/src/chatgpt/storage.ts) 处理受保护的原子文件存储。Runtime 只接收应用自己的有效令牌解析接口，不持有 refresh token 或凭证存储权限。
+- [ChatGPTAuth](../packages/chatgpt-auth/src/service.ts)：按账户 ID 管理授权、令牌刷新、账号目录缓存、失败状态与退出，不持有当前账户或所选模型；[oauth.ts](../packages/chatgpt-auth/src/oauth.ts) 处理 OAuth/OIDC 协议和 JWKS 验签。[后端适配器](../apps/server/src/chatgpt/provider.ts)负责模型目录筛选、错误转换和应用运行状态协调，[storage.ts](../apps/server/src/chatgpt/storage.ts)处理受保护的原子文件存储。Runtime 只接收应用自己的有效令牌解析接口，不持有 refresh token 或凭证存储权限。
 
 前端通过 `#/settings` 展示独立的 [SettingsPage](../apps/web/src/features/settings/SettingsPage.tsx)，同一入口兼容 Web 与桌面。App 保留聊天状态、草稿和事件订阅，切换设置页不取消生成。ModelProviders 用实例列表展示供应商及账号，详情中集中管理模型、认证、测试和编辑；协议选项来自适配器描述。浏览、登录、保存与测试不切换默认值，点击“设为默认模型”才提交 `PUT /model`。聊天输入框旁的 ModelPicker 直接选择实例和模型，仅在展开时读取脱敏配置及所选 ChatGPT 账号的模型缓存，不请求上游目录。聊天页使用会话快照中的有效模型状态，返回聊天时与默认元数据一起刷新；修改默认值不影响已有绑定。快捷选择不修改全局默认值：空会话更新自己的选择并保留 ID，已有绑定或消息时以显式选择创建新会话，保留原历史和草稿；生成期间禁用快捷选择。
 
@@ -81,7 +83,7 @@ flowchart LR
 | 端点实例、模型、凭据与默认选择                               | 后端数据目录 `models/connections.json`  | 界面配置；权限保护、原子保存，读取 API 脱敏  |
 | 各 ChatGPT 账户的注册、身份、令牌与目录缓存                  | 后端数据目录 `chatgpt/connections.json` | 界面登录；前端只接收脱敏状态                 |
 
-连接领域由 [model-connections](../packages/model-connections/src/index.ts) 定义，HTTP DTO 留在 contracts，持久化和 OAuth 留在后端。Runtime 的 [protocols](../packages/agent-runtime/src/protocols/index.ts) 静态表集中各协议的模型发现、基地址转换与 Pi API 工厂；[pi-models.ts](../packages/agent-runtime/src/pi-models.ts) 将目标组装成隔离的 Pi Model 和 Provider。新增兼容端点只需配置，非兼容协议需要适配器；没有动态插件或额外注册框架。更换执行 SDK 不要求重写连接配置，但 Pi 原生上下文需另行迁移。
+连接领域由 [model-connections](../packages/model-connections/src/index.ts) 定义，HTTP DTO 留在 contracts，认证生命周期归 chatgpt-auth，具体持久化和应用适配留在后端。Runtime 的 [protocols](../packages/agent-runtime/src/protocols/index.ts) 静态表集中各协议的模型发现、基地址转换与 Pi API 工厂；[pi-models.ts](../packages/agent-runtime/src/pi-models.ts) 将目标组装成隔离的 Pi Model 和 Provider。新增兼容端点只需配置，非兼容协议需要适配器；没有动态插件或额外注册框架。更换执行 SDK 不要求重写连接配置，但 Pi 原生上下文需另行迁移。
 
 会话创建时保存显式选择或默认选择；前端发送消息时提交界面显示的目标。任务在应用层解析具体模型引用，事务内校验客户端目标与会话选择一致，首次任务绑定具体实例和模型。会话快照和模型状态基于同一份会话读取。之后使用绑定，默认值变化不会把历史自动发给其他模型。每次调用捕获实例 ID、配置版本与模型快照，Runtime 只接收明确目标，不读取当前默认值；凭据在请求时按目标实例解析。不同实例即使品牌、名称或地址相同，也不共享身份。不读取环境密钥或全局 Pi 配置。
 
@@ -89,9 +91,9 @@ flowchart LR
 
 Pi 使用应用专属的工作目录、设置、内存凭据存储和会话目录，不加载用户全局配置、默认工具、skills 或扩展。已有展示历史而 Pi 原生上下文缺失时，继续生成会失败，需要新建会话。
 
-ChatGPT 模式包装 Pi 的 `openai` provider，禁用环境密钥解析，经通用连接解析器调用 ChatGPTConnectionService 为每次模型请求提供有效令牌；Pi 仍处理完整上下文、压缩和 Responses 流。账号模型目录与 Pi 本地目录取交集，启动与 `/meta` 不请求远端。登录时使用独立临时回环监听器，不豁免业务 API 的 Bearer/Host/Origin 校验。正式 client ID 和 host ID 持久化复用，授权码仅由后端接收，ID token 通过 JWKS 验签并检查 issuer、audience、有效期和 nonce。
+ChatGPT 模式包装 Pi 的 `openai` provider，禁用环境密钥解析，经通用连接解析器由认证包为每次模型请求提供有效令牌；Pi 仍处理完整上下文、压缩和 Responses 流。Pi 1.5.0 自带 ChatGPT 登录，其默认凭据存储按 provider ID 管理一份凭据，返回的登录凭据也不含账号身份；应用需要多账号、重授权时核对身份和独立的凭据生命周期，因此使用自己的 OAuth 流和存储，不读取 Pi 全局登录。适配层对账号授权目录与 Pi 本地目录取交集，启动与 `/meta` 不请求远端。登录时使用独立临时回环监听器，不豁免业务 API 的 Bearer/Host/Origin 校验。正式 client ID 和 host ID 持久化复用，授权码仅由后端接收，ID token 通过 JWKS 验签并检查 issuer、audience、有效期和 nonce。
 
-ChatGPT 令牌刷新、授权回调与退出按账号串行，远端请求不会占用其他账号的操作队列；整份凭据文件的写入仍串行，避免并发覆盖，目录锁排除其他服务。模型查询、令牌解析、失败处理和退出都显式指定实例 ID。调用取消只取消等待，已经开始的令牌轮换必须保存；保存失败时保留内存中的新令牌，先重试保存，避免使用旧 refresh token。退出阻止该实例的新调用，只取消绑定它的活动任务，再撤销最新令牌，其他实例仍可生成。新实例先保存稳定 ID，授权完成补充注册与凭据，重新授权复用注册并验证身份；启动授权失败时界面保留该实例供重试，首期只允许一个待完成的登录尝试。
+ChatGPT 令牌刷新、授权回调与退出按账号串行，远端请求不会占用其他账号的操作队列；整份凭据文件的写入仍串行，避免并发覆盖，目录锁排除其他服务。模型查询、令牌解析、失败处理和退出都显式指定实例 ID。调用取消只取消等待，已经开始的令牌轮换必须保存；保存失败时保留内存中的新令牌，先重试保存，避免使用旧 refresh token。退出阻止该实例的新调用，只取消绑定它的活动任务，再撤销最新令牌，其他实例仍可生成。关闭等待已开始的退出流程结束后才释放目录锁，避免旧服务在新服务启动后继续写入。新实例先保存稳定 ID，授权完成补充注册与凭据，重新授权复用注册并验证身份；启动授权失败时界面保留该实例供重试，首期只允许一个待完成的登录尝试。
 
 会话编排与模型调用接口解耦：ChatService 管理会话、任务和绑定，ModelService 解析选择及凭据，AgentEngine 执行明确目标。Pi 适配器负责会话专属原生上下文和压缩。更换执行 SDK 无需改变供应商配置或模型选择契约，但原生上下文本身需要迁移。
 
@@ -119,10 +121,10 @@ Pi 适配层在 SDK 导入后初始化进程级环境代理，使用 Undici 的�
 
 1. 拒绝新业务操作和尚未开始的排队变更，关闭已有及启动中的 OAuth 回调监听器，取消活动任务、目录刷新和连接测试并作有界等待。
 2. 等待不可取消的上下文删除完成，再持久化未完成任务的中断状态。
-3. 等待在途凭证刷新保存，关闭事件订阅、HTTP 连接和 Store。
+3. 等待在途凭证刷新保存和已开始的账号退出结束，关闭事件订阅、HTTP 连接和 Store。
 4. 关闭引擎，在引擎真正停止后释放目录锁。
 
-父进程断开也会触发后端关闭；桌面退出会取消恢复并回收在途子进程，监管另有强制退出兜底。
+父进程断开也会触发后端关闭；桌面退出会取消恢复并回收在途子进程。桌面监管在 60 秒后仍会强制终止未退出的后端；被强制终止时不能保证未完成的退出操作成功。
 
 ### 故障与恢复
 

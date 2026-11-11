@@ -14,8 +14,8 @@
   "dependencies": {
     "@learn-electron/model-connections": "*",
     "@learn-electron/agent-runtime": "*",
+    "@learn-electron/chatgpt-auth": "*",
     "@learn-electron/contracts": "*",
-    "jose": "6.2.16",
     "proper-lockfile": "4.1.2"
   },
   "devDependencies": {

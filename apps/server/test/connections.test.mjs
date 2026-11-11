@@ -8,7 +8,7 @@ import { startServer } from '../src/server.ts'
 import { createMockEngine } from '@learn-electron/agent-runtime'
 import { ProtectedFile } from '../src/protected-file.ts'
 import { createServer } from 'node:http'
-import { ChatGPTConnectionService } from '../src/chatgpt/connection-service.ts'
+import { ChatGPTProvider } from '../src/chatgpt/provider.ts'
 import { oauthFixture } from './helpers/chatgpt.mjs'
 import { modelProvider } from './helpers/model-provider.mjs'
 
@@ -570,14 +570,10 @@ test(
       'A late exchange cannot activate its cancelled connection',
     )
 
-    const begin = ChatGPTConnectionService.prototype.beginLogin
-    const shortLogin = t.mock.method(
-      ChatGPTConnectionService.prototype,
-      'beginLogin',
-      function (profileId) {
-        return begin.call(this, profileId, 25)
-      },
-    )
+    const begin = ChatGPTProvider.prototype.beginLogin
+    const shortLogin = t.mock.method(ChatGPTProvider.prototype, 'beginLogin', function (profileId) {
+      return begin.call(this, profileId, 25)
+    })
     attempt = await f.beginLogin()
     await finishLogin(f, attempt, 'expired')
     shortLogin.mock.restore()

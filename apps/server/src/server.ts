@@ -15,7 +15,7 @@ import {
   ModelError,
   type AgentEngine,
 } from '@learn-electron/agent-runtime'
-import { ChatGPTConnectionService } from './chatgpt/connection-service.ts'
+import { ChatGPTProvider } from './chatgpt/provider.ts'
 import { ModelService } from './model-service.ts'
 import {
   parseSaveProvider,
@@ -25,7 +25,7 @@ import {
   modelAdapters,
 } from '@learn-electron/contracts/models'
 import { isObject } from '@learn-electron/model-connections'
-import type { ChatGPTOAuth } from './chatgpt/oauth.ts'
+import type { ChatGPTOAuth } from '@learn-electron/chatgpt-auth'
 import { ChatService } from './chat-service.ts'
 import { ChatError, HttpError, type ChatErrorCode } from './errors.ts'
 import { acquireDataDirectory } from './ownership.ts'
@@ -115,13 +115,13 @@ export async function startServer(
   const directory = resolve(options.dataDir)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const releaseOwnership = await acquireDataDirectory(directory)
-  let chatgpt: ChatGPTConnectionService | undefined
+  let chatgpt: ChatGPTProvider | undefined
   let models: ModelService | undefined
   let isChatBusy = (_instanceId?: string) => false
   let engine: AgentEngine
   try {
     if (!options.engine) {
-      chatgpt = await ChatGPTConnectionService.create({
+      chatgpt = await ChatGPTProvider.create({
         dataDir: directory,
         models: await getOpenAIModels(),
         isBusy: (id) => isChatBusy(id),
@@ -227,7 +227,7 @@ export async function startServer(
           response,
           201,
           isObject(body) && body.kind === 'chatgpt'
-            ? await models.createChatGPT()
+            ? await models.createAccount()
             : await models.save(parse(parseSaveProvider, body)),
         )
       } else if (id && !action && method === 'PATCH')

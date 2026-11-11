@@ -1,6 +1,9 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose'
-import { isRecord } from '@learn-electron/contracts'
-import type { ChatGPTModel } from '@learn-electron/contracts/chatgpt'
+import type { ChatGPTModel } from './types.ts'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 export const CHATGPT_SCOPE =
   'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct'
@@ -25,7 +28,7 @@ export class OAuthError extends Error {
   }
 }
 
-/** OAuth/OIDC wire protocol only. Storage and active-account policy live in ConnectionService. */
+/** OAuth/OIDC wire protocol; account lifecycle and storage are managed separately. */
 export class ChatGPTOAuth {
   readonly issuer: string
   readonly resource: string

@@ -90,7 +90,10 @@ test(
     )
     // ChatGPT login is available in the same Pi process without an environment mode.
     await page.getByRole('link', { name: '设置', exact: true }).click()
-    await page.getByRole('button', { name: 'Continue with ChatGPT' }).waitFor()
+    await page.getByRole('button', { name: '添加提供商', exact: true }).click()
+    const form = page.getByRole('dialog', { name: '添加模型提供商' })
+    await form.getByLabel('提供商预设').selectOption('chatgpt')
+    await form.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).waitFor()
     const state = await page.evaluate(async () => {
       const response = await fetch(`${window.electronAPI.apiBaseUrl}/api/v1/model-providers`)
       return response.json()

@@ -1,10 +1,15 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
-import { ModelError, type ModelErrorCode } from '@learn-electron/model-connections'
-import type { ChatGPTLogin, ChatGPTModel, ChatGPTProfile } from '@learn-electron/contracts/chatgpt'
-import { HttpError } from '../errors.ts'
 import { CHATGPT_SCOPE, ChatGPTOAuth, OAuthError, PLAN_SCOPE } from './oauth.ts'
-import { ConnectionStorage, type SavedConnections, type SavedProfile } from './storage.ts'
+import {
+  AuthError,
+  type AccountStorage,
+  type ChatGPTLogin,
+  type ChatGPTModel,
+  type ChatGPTProfile,
+  type SavedConnections,
+  type SavedProfile,
+} from './types.ts'
 
 interface LoginAttempt {
   view: ChatGPTLogin
@@ -38,7 +43,7 @@ function waitFor<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 /** Account-scoped operations with serialized whole-file writes. */
-export class ChatGPTConnectionService {
+export class ChatGPTAuth {
   private attempt?: LoginAttempt
   private tail: Promise<unknown> = Promise.resolve()
   private readonly accounts = new Map<string, Promise<void>>()
@@ -46,35 +51,24 @@ export class ChatGPTConnectionService {
   private closed = false
   private startingLogin = false
   private unpersisted = false
-  private readonly signingOut = new Set<string>()
-  private readonly supported: Set<string>
-
+  private readonly signingOut = new Map<string, Promise<void>>()
   private constructor(
     private state: SavedConnections,
-    private readonly storage: ConnectionStorage,
+    private readonly storage: AccountStorage,
     private readonly oauth: ChatGPTOAuth,
-    models: ChatGPTModel[],
-    private readonly isBusy: (instanceId?: string) => boolean,
-    private readonly isUpdating: (instanceId: string) => boolean,
-  ) {
-    this.supported = new Set(models.map((model) => model.id))
-  }
+    private readonly agentName: string,
+  ) {}
 
   static async create(options: {
-    dataDir: string
-    models: ChatGPTModel[]
-    isBusy: (instanceId?: string) => boolean
-    isUpdating?: (instanceId: string) => boolean
+    storage: AccountStorage
+    agentName: string
     oauth?: ChatGPTOAuth | undefined
-  }): Promise<ChatGPTConnectionService> {
-    const storage = new ConnectionStorage(options.dataDir)
-    return new ChatGPTConnectionService(
-      await storage.load(),
-      storage,
+  }): Promise<ChatGPTAuth> {
+    return new ChatGPTAuth(
+      await options.storage.load(),
+      options.storage,
       options.oauth ?? new ChatGPTOAuth(),
-      options.models,
-      options.isBusy,
-      options.isUpdating ?? (() => false),
+      options.agentName,
     )
   }
 
@@ -105,25 +99,19 @@ export class ChatGPTConnectionService {
 
   private profile(id: string): SavedProfile {
     const profile = this.state.profiles.find((item) => item.id === id)
-    if (!profile) throw new HttpError(404, 'connection_not_found', '模型连接不存在')
+    if (!profile) throw new AuthError('connection_not_found', '模型连接不存在')
     return profile
   }
 
   private async change<T>(operation: () => Promise<T>, instanceId?: string): Promise<T> {
-    if (this.closed) throw new HttpError(503, 'shutting_down', '服务正在停止')
-    if (
-      instanceId &&
-      (this.changing.has(instanceId) ||
-        this.signingOut.has(instanceId) ||
-        this.isBusy(instanceId) ||
-        this.isUpdating(instanceId))
-    )
-      throw new HttpError(409, 'connection_busy', '请先停止生成，再更改模型连接')
+    if (this.closed) throw new AuthError('shutting_down', '服务正在停止')
+    if (instanceId && (this.changing.has(instanceId) || this.signingOut.has(instanceId)))
+      throw new AuthError('connection_busy', '请先停止生成，再更改模型连接')
     if (instanceId) this.changing.add(instanceId)
     try {
       const run = () => {
         // Already-issued token rotations still persist before queued operations stop.
-        if (this.closed) throw new HttpError(503, 'shutting_down', '服务正在停止')
+        if (this.closed) throw new AuthError('shutting_down', '服务正在停止')
         return operation()
       }
       return await (instanceId ? this.enqueueAccount(instanceId, run) : this.enqueue(run))
@@ -149,7 +137,7 @@ export class ChatGPTConnectionService {
         profile.tokens ||
         (this.attempt?.profileId === instanceId && this.attempt.view.status === 'pending')
       )
-        throw new HttpError(409, 'authorization_active', '请先退出该账号或取消授权，再移除实例')
+        throw new AuthError('authorization_active', '请先退出该账号或取消授权，再移除实例')
       await beforeRemove()
       await this.enqueue(async () => {
         const next = structuredClone(this.state)
@@ -179,9 +167,7 @@ export class ChatGPTConnectionService {
         status:
           this.attempt?.profileId === profile.id && this.attempt.view.status === 'pending'
             ? 'authorizing'
-            : this.changing.has(profile.id) ||
-                this.signingOut.has(profile.id) ||
-                this.isUpdating(profile.id)
+            : this.changing.has(profile.id) || this.signingOut.has(profile.id)
               ? 'busy'
               : profile.reauth
                 ? 'reauth_required'
@@ -203,22 +189,16 @@ export class ChatGPTConnectionService {
       !profile.tokens ||
       profile.reauth
     )
-      throw new ModelError('auth_required')
-    if (!profile.tokens.scopes.includes(PLAN_SCOPE)) throw new ModelError('permission_missing')
-    return this.definition(instanceId, modelId)
-  }
-
-  definition(instanceId: string, modelId: string): ChatGPTModel {
-    const profile = this.profile(instanceId)
+      throw new AuthError('auth_required')
+    if (!profile.tokens.scopes.includes(PLAN_SCOPE)) throw new AuthError('permission_missing')
     const model = profile.models.find((item) => item.id === modelId)
-    if (!model || !this.supported.has(modelId))
-      throw new HttpError(400, 'model_unavailable', '请选择当前连接可用的模型')
+    if (!model) throw new AuthError('model_unavailable', '请选择当前连接可用的模型')
     return { ...model }
   }
 
   async beginLogin(profileId: string, timeoutMs = 900_000): Promise<ChatGPTLogin> {
     if (this.startingLogin || this.attempt?.view.status === 'pending')
-      throw new HttpError(409, 'login_pending', '已有登录正在进行')
+      throw new AuthError('login_pending', '已有登录正在进行')
     this.startingLogin = true
     try {
       return await this.change(async () => {
@@ -290,7 +270,7 @@ export class ChatGPTConnectionService {
             server.close(() => done())
             server.closeAllConnections()
           })
-          throw new HttpError(503, 'shutting_down', '服务正在停止')
+          throw new AuthError('shutting_down', '服务正在停止')
         }
         const address = server.address()
         if (!address || typeof address === 'string') throw new Error('无法启动 OAuth 回调')
@@ -307,7 +287,7 @@ export class ChatGPTConnectionService {
           code_challenge_method: 'S256',
           code_challenge: createHash('sha256').update(verifier).digest('base64url'),
         })
-        if (!profile.clientId) params.set('agent_name_hint', 'Pi Chat')
+        if (!profile.clientId) params.set('agent_name_hint', this.agentName)
         if (profile.tokens && !profile.tokens.scopes.includes(PLAN_SCOPE))
           params.set('prompt', 'consent')
         // Retained ID tokens stay in the backend; do not put id_token_hint in a renderer-visible URL.
@@ -344,7 +324,7 @@ export class ChatGPTConnectionService {
 
   login(id: string): ChatGPTLogin {
     if (this.attempt?.view.id !== id)
-      throw new HttpError(404, 'login_not_found', '登录请求不存在，请重新登录')
+      throw new AuthError('login_not_found', '登录请求不存在，请重新登录')
     return { ...this.attempt.view }
   }
 
@@ -402,7 +382,7 @@ export class ChatGPTConnectionService {
       if (existing.subject && identity.subject !== existing.subject)
         throw new OAuthError('identity_changed')
       const models = tokens.scopes.includes(PLAN_SCOPE)
-        ? await this.catalog(tokens.accessToken).catch(() => [])
+        ? await this.oauth.models(tokens.accessToken).catch(() => [])
         : []
       if (attempt.view.status !== 'pending' || this.closed) return
       await this.enqueue(async () => {
@@ -428,34 +408,30 @@ export class ChatGPTConnectionService {
     }
   }
 
-  private async catalog(token: string): Promise<ChatGPTModel[]> {
-    return (await this.oauth.models(token)).filter((model) => this.supported.has(model.id))
-  }
-
   async models(instanceId: string, refresh = false): Promise<ChatGPTModel[]> {
     const profile = this.profile(instanceId)
     if (!profile.tokens?.scopes.includes(PLAN_SCOPE) || profile.reauth) return []
-    if (!refresh) return [...profile.models]
+    if (!refresh) return profile.models.map((model) => ({ ...model }))
     return this.change(async () => {
       const token = await this.resolveToken(profile.id)
-      const models = await this.catalog(token)
+      const models = await this.oauth.models(token)
       await this.enqueue(async () => {
         const next = structuredClone(this.state)
         next.profiles.find((item) => item.id === profile.id)!.models = models
         await this.commit(next)
       })
-      return models
+      return models.map((model) => ({ ...model }))
     }, instanceId)
   }
 
   token(instanceId: string, signal: AbortSignal): Promise<string> {
     signal.throwIfAborted()
     if (this.closed || this.changing.has(instanceId) || this.signingOut.has(instanceId))
-      return Promise.reject(new ModelError('auth_required'))
+      return Promise.reject(new AuthError('auth_required'))
     // Cancellation stops only the caller's wait; an issued replacement must still be saved.
     return waitFor(
       this.enqueueAccount(instanceId, () => {
-        if (this.closed) throw new ModelError('auth_required')
+        if (this.closed) throw new AuthError('auth_required')
         signal.throwIfAborted()
         return this.resolveToken(instanceId)
       }),
@@ -469,11 +445,11 @@ export class ChatGPTConnectionService {
       await this.enqueue(async () => {
         if (this.unpersisted) await this.commit(this.state)
       })
-    if (this.signingOut.has(instanceId)) throw new ModelError('auth_required')
+    if (this.signingOut.has(instanceId)) throw new AuthError('auth_required')
     const profile = this.profile(instanceId)
     const tokens = profile.tokens
-    if (!tokens || profile.reauth) throw new ModelError('auth_required')
-    if (!tokens.scopes.includes(PLAN_SCOPE)) throw new ModelError('permission_missing')
+    if (!tokens || profile.reauth) throw new AuthError('auth_required')
+    if (!tokens.scopes.includes(PLAN_SCOPE)) throw new AuthError('permission_missing')
     const now = Date.now()
     if (
       tokens.expiresAt > now + 60_000 ||
@@ -496,7 +472,7 @@ export class ChatGPTConnectionService {
         this.unpersisted = true
         await this.commit(next)
       })
-      if (!replacement.scopes.includes(PLAN_SCOPE)) throw new ModelError('permission_missing')
+      if (!replacement.scopes.includes(PLAN_SCOPE)) throw new AuthError('permission_missing')
       return replacement.accessToken
     } catch (error) {
       if (error instanceof OAuthError && terminalRefreshErrors.has(error.code)) {
@@ -507,16 +483,16 @@ export class ChatGPTConnectionService {
           saved.reauth = true
           await this.commit(next)
         })
-        throw new ModelError('auth_required')
+        throw new AuthError('auth_required')
       }
-      throw error instanceof ModelError
+      throw error instanceof AuthError
         ? error
-        : new ModelError('provider_failed', { cause: error })
+        : new AuthError('provider_failed', 'ChatGPT 授权服务暂不可用', { cause: error })
     }
   }
 
-  async failed(instanceId: string, code: ModelErrorCode): Promise<void> {
-    if (this.closed || (code !== 'auth_required' && code !== 'permission_missing')) return
+  async failed(instanceId: string, code: 'auth_required' | 'permission_missing'): Promise<void> {
+    if (this.closed) return
     await this.enqueueAccount(instanceId, () =>
       this.enqueue(async () => {
         const profile = this.state.profiles.find((item) => item.id === instanceId)
@@ -534,18 +510,17 @@ export class ChatGPTConnectionService {
   }
 
   async logout(instanceId: string, stop: () => Promise<void>): Promise<{ revoked: boolean }> {
-    if (
-      this.closed ||
-      this.changing.has(instanceId) ||
-      this.signingOut.has(instanceId) ||
-      this.isUpdating(instanceId)
-    )
-      throw new HttpError(409, 'connection_busy', '模型连接正在更新')
+    if (this.closed || this.changing.has(instanceId) || this.signingOut.has(instanceId))
+      throw new AuthError('connection_busy', '模型连接正在更新')
     this.profile(instanceId)
-    this.signingOut.add(instanceId)
-    if (this.attempt?.profileId === instanceId && this.attempt.view.status === 'pending')
-      this.cancelLogin(this.attempt.view.id)
+    let finishLogout!: () => void
+    const finished = new Promise<void>((resolve) => {
+      finishLogout = resolve
+    })
+    this.signingOut.set(instanceId, finished)
     try {
+      if (this.attempt?.profileId === instanceId && this.attempt.view.status === 'pending')
+        this.cancelLogin(this.attempt.view.id)
       await stop()
       return await this.enqueueAccount(instanceId, async () => {
         const profile = this.profile(instanceId)
@@ -568,13 +543,14 @@ export class ChatGPTConnectionService {
       })
     } finally {
       this.signingOut.delete(instanceId)
+      finishLogout()
     }
   }
 
   async close(): Promise<void> {
     this.closed = true
     if (this.attempt?.view.status === 'pending') this.cancelLogin(this.attempt.view.id)
-    await Promise.all(this.accounts.values())
+    await Promise.all([...this.accounts.values(), ...this.signingOut.values()])
     await this.tail
     if (this.unpersisted) await this.enqueue(() => this.commit(this.state))
   }

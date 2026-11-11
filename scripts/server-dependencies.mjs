@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs'
 
 // Workspace code is bundled; third-party production dependencies stay external.
-const manifests = ['../apps/server/package.json', '../packages/agent-runtime/package.json']
+const manifests = [
+  '../apps/server/package.json',
+  '../packages/agent-runtime/package.json',
+  '../packages/chatgpt-auth/package.json',
+]
 export const serverDependencies = Object.fromEntries(
   manifests
     .flatMap((path) => {

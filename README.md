@@ -19,6 +19,7 @@ apps/server/                HTTP API、鉴权、任务调度、SQLite 存储与�
 apps/desktop/               Electron 窗口、系统集成、本地服务监管与代理
 packages/contracts/         应用自己的请求、响应、事件和参数校验
 packages/model-connections/ 与 SDK 无关的连接定义、模型元数据和纯校验
+packages/chatgpt-auth/      ChatGPT OAuth、账户状态与令牌生命周期
 packages/agent-runtime/     AgentEngine 接口、Pi 适配器、显式模拟引擎
 scripts/                    后端构建和桌面运行时准备
 ```

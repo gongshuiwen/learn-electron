@@ -20,8 +20,17 @@ test('a model reference identifies a concrete provider instance and model', () =
     instanceId: 'primary',
     modelId: 'vendor/model',
   })
-  assert.throws(() => parseModelRef({ instanceId: 'primary' }))
-  assert.throws(() => parseModelRef({ kind: 'route', routeId: 'daily' }))
+  for (const invalid of [
+    null,
+    { instanceId: 'primary' },
+    { modelId: 'x' },
+    { instanceId: '../secret', modelId: 'x' },
+    { instanceId: 'primary', modelId: '' },
+    { instanceId: 'primary', modelId: 3 },
+    { instanceId: 'primary', modelId: 'm'.repeat(201) },
+    { kind: 'route', routeId: 'daily' },
+  ])
+    assert.throws(() => parseModelRef(invalid))
 })
 
 test('connection configuration accepts arbitrary model IDs and keeps application defaults independent of an SDK catalog', () => {

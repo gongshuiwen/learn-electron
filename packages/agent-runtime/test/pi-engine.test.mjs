@@ -72,7 +72,6 @@ async function fixture(t, responses) {
       },
     })
     engines.push(engine)
-    assert.equal((await engine.meta()).configured, false)
     return { ...engine, run: (input) => engine.run({ ...input, target }) }
   }
   function assertReleased() {

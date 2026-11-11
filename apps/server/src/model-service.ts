@@ -24,9 +24,21 @@ import type {
   ProvidersState,
   SaveProviderRequest,
 } from '@learn-electron/contracts/models'
-import type { ChatGPTConnectionService } from './chatgpt/connection-service.ts'
 import { HttpError } from './errors.ts'
 import { ProtectedFile } from './protected-file.ts'
+
+/** Account-backed models are supplied by the application, independent of their auth implementation. */
+export interface ModelAccounts {
+  view(): Omit<ProvidersState, 'defaultSelection'>
+  describe(id: string): { provider: string; authMode: 'chatgpt' } | undefined
+  resolve(ref: ModelRef): ModelTarget
+  models(id: string, refresh?: boolean): Promise<Array<{ id: string; name: string }>>
+  credentials(target: ModelTarget, signal: AbortSignal): Promise<RequestCredentials>
+  failed(id: string, code: ModelErrorCode): Promise<void>
+  createProfile(): Promise<string>
+  removeProfile(id: string, beforeRemove: () => Promise<void>): Promise<void>
+  close(): Promise<void>
+}
 
 interface SavedInstance extends ConnectionConfig {
   id: string
@@ -76,13 +88,13 @@ export class ModelService implements CredentialResolver {
   private constructor(
     private state: SavedState,
     private readonly file: ProtectedFile<SavedState>,
-    private readonly chatgpt: ChatGPTConnectionService,
+    private readonly accounts: ModelAccounts,
     private readonly isBusy: (instanceId: string) => boolean,
   ) {}
 
   static async create(
     dataDir: string,
-    chatgpt: ChatGPTConnectionService,
+    accounts: ModelAccounts,
     isBusy: (instanceId: string) => boolean,
   ): Promise<ModelService> {
     const file = new ProtectedFile<SavedState>(join(dataDir, 'models'), 'connections.json', decode)
@@ -93,10 +105,10 @@ export class ModelService implements CredentialResolver {
     }))
     const ids = [
       ...state.instances.map(({ id }) => id),
-      ...chatgpt.status().profiles.map(({ id }) => id),
+      ...accounts.view().instances.map(({ id }) => id),
     ]
     if (new Set(ids).size !== ids.length) throw new Error('模型供应商标识冲突')
-    return new ModelService(state, file, chatgpt, isBusy)
+    return new ModelService(state, file, accounts, isBusy)
   }
 
   private change<T>(operation: () => Promise<T>, instanceId?: string): Promise<T> {
@@ -128,7 +140,7 @@ export class ModelService implements CredentialResolver {
     return this.changing.has(instanceId)
   }
   status(): ProvidersState {
-    const accounts = this.chatgpt.status()
+    const accounts = this.accounts.view()
     return {
       defaultSelection: this.defaultSelection(),
       instances: [
@@ -138,16 +150,9 @@ export class ModelService implements CredentialResolver {
           hasCredential: Boolean(apiKey),
           hasHeaders: Object.keys(headers).length > 0,
         })),
-        ...accounts.profiles.map((profile) => ({
-          ...profile,
-          kind: 'chatgpt' as const,
-          vendor: 'openai' as const,
-        })),
+        ...accounts.instances,
       ],
-      chatgpt: {
-        enabled: true,
-        ...(accounts.pendingLogin ? { pendingLogin: accounts.pendingLogin } : {}),
-      },
+      chatgpt: accounts.chatgpt,
     }
   }
   resolve(selection: ModelRef): ModelTarget {
@@ -167,35 +172,32 @@ export class ModelService implements CredentialResolver {
           reason: 'not_selected',
         }
       const target = this.target(ref)
-      const account =
-        target.kind === 'chatgpt'
-          ? this.chatgpt.status().profiles.find(({ id }) => id === target.instanceId)
-          : undefined
+      const account = this.accounts.describe(target.instanceId)
       return {
         selection,
         target: modelRef(target),
         model: {
-          provider: account ? `ChatGPT · ${account.name}` : target.provider,
+          provider: account?.provider ?? target.provider,
           id: target.model.id,
         },
         configured: true,
-        ...(target.kind === 'chatgpt' ? { authMode: 'chatgpt' } : {}),
+        ...(account ? { authMode: account.authMode } : {}),
       }
     } catch (error) {
       if (!(error instanceof ModelError || error instanceof HttpError)) throw error
       const instanceId = ref?.instanceId
-      const account = this.chatgpt.status().profiles.find(({ id }) => id === instanceId)
+      const account = instanceId ? this.accounts.describe(instanceId) : undefined
       const endpoint = this.state.instances.find(({ id }) => id === instanceId)
       return {
         selection,
         target: ref ?? null,
         model: {
-          provider: endpoint?.name ?? (account ? `ChatGPT · ${account.name}` : 'unconfigured'),
+          provider: endpoint?.name ?? account?.provider ?? 'unconfigured',
           id: ref?.modelId ?? 'unconfigured',
         },
         configured: false,
         reason: error.code,
-        ...(account ? { authMode: 'chatgpt' } : {}),
+        ...(account ? { authMode: account.authMode } : {}),
       }
     }
   }
@@ -205,14 +207,7 @@ export class ModelService implements CredentialResolver {
     if (this.changing.has(ref.instanceId))
       throw new HttpError(409, 'connection_busy', '该供应商实例正在更新')
     const entry = this.state.instances.find(({ id }) => id === ref.instanceId)
-    if (!entry)
-      return {
-        instanceId: ref.instanceId,
-        revision: 1,
-        kind: 'chatgpt',
-        provider: 'openai',
-        model: parseModelDefinition(this.chatgpt.model(ref.instanceId, ref.modelId)),
-      }
+    if (!entry) return this.accounts.resolve(ref)
     this.endpointCredentials(entry)
     const model = entry.models.find(({ id }) => id === ref.modelId)
     if (!model) throw new HttpError(400, 'model_unavailable', '该实例未配置此模型')
@@ -238,15 +233,14 @@ export class ModelService implements CredentialResolver {
   async credentials(target: ModelTarget, signal: AbortSignal): Promise<RequestCredentials> {
     signal.throwIfAborted()
     if (this.closed) throw new ModelError('auth_required')
-    if (target.kind === 'chatgpt')
-      return { apiKey: await this.chatgpt.token(target.instanceId, signal), headers: {} }
+    if (target.kind !== 'endpoint') return this.accounts.credentials(target, signal)
     const entry = this.endpoint(target.instanceId)
     if (entry.revision !== target.revision) throw new ModelError('connection_changed')
     return this.endpointCredentials(entry)
   }
   failed(target: ModelTarget, code: ModelErrorCode): Promise<void> {
-    return target.kind === 'chatgpt'
-      ? this.chatgpt.failed(target.instanceId, code)
+    return target.kind !== 'endpoint'
+      ? this.accounts.failed(target.instanceId, code)
       : Promise.resolve()
   }
 
@@ -287,15 +281,15 @@ export class ModelService implements CredentialResolver {
         next.instances = next.instances.filter((item) => item.id !== id)
         if (next.defaultSelection?.instanceId === id) next.defaultSelection = null
         if (endpoint) await this.commit(next)
-        else await this.chatgpt.removeProfile(id, () => this.commit(next))
+        else await this.accounts.removeProfile(id, () => this.commit(next))
         return this.status()
       },
       endpoint ? id : undefined,
     )
   }
-  createChatGPT(): Promise<ProvidersState> {
+  createAccount(): Promise<ProvidersState> {
     return this.change(async () => {
-      await this.chatgpt.createProfile()
+      await this.accounts.createProfile()
       return this.status()
     })
   }
@@ -310,13 +304,13 @@ export class ModelService implements CredentialResolver {
     const entry = this.state.instances.find((item) => item.id === id)
     return entry
       ? Promise.resolve(structuredClone(entry.models))
-      : this.chatgpt.models(id).then((items) => items.map(parseModelDefinition))
+      : this.accounts.models(id).then((items) => items.map(parseModelDefinition))
   }
   refreshModels(id: string): Promise<ModelDefinition[]> {
     if (this.closed) return Promise.reject(new HttpError(503, 'shutting_down', '服务正在停止'))
     const entry = this.state.instances.find((item) => item.id === id)
     if (!entry)
-      return this.chatgpt.models(id, true).then((items) => items.map(parseModelDefinition))
+      return this.accounts.models(id, true).then((items) => items.map(parseModelDefinition))
     return this.change(async () => {
       const models = await discoverEndpointModels(
         entry,
@@ -348,7 +342,7 @@ export class ModelService implements CredentialResolver {
   async close(): Promise<void> {
     this.closed = true
     this.shutdown.abort()
-    const results = await Promise.allSettled([this.tail, this.chatgpt.close()])
+    const results = await Promise.allSettled([this.tail, this.accounts.close()])
     for (const result of results) if (result.status === 'rejected') throw result.reason
   }
 }
