@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
-import { request as httpRequest } from 'node:http'
+import { request as httpRequest, ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { setImmediate, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
 import { startServer } from '../src/server.ts'
+import { ChatService } from '../src/chat-service.ts'
 
 const { fetch, AbortSignal, TextDecoder, URL } = globalThis
 const TOKEN = 'integration-test-secret-token'
@@ -352,6 +353,57 @@ test('an old run stream preserves the current conversation snapshot and then clo
   assert.equal((await settled(request, conversation.id)).run.status, 'completed')
 })
 
+test(
+  'disconnecting during asynchronous SSE preparation releases the subscription without cancelling generation',
+  { timeout: 10_000 },
+  async (t) => {
+    const { request, engine: fake } = await fixture(t, { engine: engine({ interval: 10_000 }) })
+    const conversation = await create(request)
+    const run = await start(request, conversation.id)
+    const info = await fake.meta()
+    const preparing = Promise.withResolvers()
+    const resume = Promise.withResolvers()
+    const disconnected = Promise.withResolvers()
+    const unsubscribed = Promise.withResolvers()
+    fake.meta = () => {
+      preparing.resolve()
+      return resume.promise
+    }
+    const emit = ServerResponse.prototype.emit
+    t.mock.method(ServerResponse.prototype, 'emit', function (event, ...args) {
+      const result = emit.call(this, event, ...args)
+      if (event === 'close') disconnected.resolve()
+      return result
+    })
+    const subscribe = ChatService.prototype.subscribe
+    t.mock.method(ChatService.prototype, 'subscribe', async function (...args) {
+      const result = await subscribe.apply(this, args)
+      return {
+        ...result,
+        unsubscribe() {
+          result.unsubscribe()
+          unsubscribed.resolve()
+        },
+      }
+    })
+    const controller = new AbortController()
+    const response = request(`/runs/${run.id}/events`, { signal: controller.signal }).catch(
+      (error) => error,
+    )
+    await preparing.promise
+    controller.abort()
+    await response
+    await disconnected.promise
+    resume.resolve(info)
+    await unsubscribed.promise
+    fake.meta = () => Promise.resolve(info)
+    assert.equal(
+      (await (await request(`/conversations/${conversation.id}`)).json()).run.status,
+      'running',
+    )
+  },
+)
+
 test('disconnecting an SSE consumer does not cancel work; reconnect returns a coherent snapshot', async (t) => {
   const { request } = await fixture(t, { engine: engine({ interval: 70 }) })
   const conversation = await create(request)
@@ -626,12 +678,73 @@ test('shutdown saves other pending results when one finalization still fails', a
   assert.equal(nextEngine.calls, 0)
 })
 
+function recoverServer(signal, start) {
+  signal.throwIfAborted()
+  const starting = start()
+  return {
+    ready: starting.then((server) => {
+      signal.throwIfAborted()
+      return server
+    }),
+    async close() {
+      // Cancellation rejects ready, but cleanup still owns the startup's server.
+      const server = await starting.catch(() => undefined)
+      await server?.close()
+    },
+  }
+}
+
+test(
+  'crash recovery timeout waits for startup before closing the server and deleting its directory',
+  { timeout: 10_000 },
+  async (t) => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'learn-electron-recovery-cancel-'))
+    const startup = Promise.withResolvers()
+    const timeout = new AbortController()
+    const reason = new DOMException('Recovery startup timed out', 'TimeoutError')
+    let closed = false
+    let removing = false
+    const server = {
+      async close() {
+        await access(dataDir)
+        closed = true
+      },
+    }
+    const recovery = recoverServer(timeout.signal, () => startup.promise)
+    timeout.abort(reason)
+    const cancelled = assert.rejects(recovery.ready, (error) => error === reason)
+    const cleanup = (async () => {
+      await recovery.close()
+      removing = true
+      assert.equal(dirname(resolve(dataDir)), resolve(tmpdir()))
+      await rm(dataDir, { recursive: true, force: true, maxRetries: 5 })
+    })()
+    t.after(async () => {
+      startup.resolve(server)
+      await Promise.all([cancelled, cleanup])
+    })
+
+    assert.throws(
+      () => recoverServer(timeout.signal, () => assert.fail('Cancelled recovery must not start')),
+      (error) => error === reason,
+    )
+    await setImmediate()
+    assert.equal(removing, false, 'Directory cleanup must wait for the pending startup')
+    assert.equal(closed, false)
+    await access(dataDir)
+    startup.resolve(server)
+    await Promise.all([cancelled, cleanup])
+    assert.equal(closed, true)
+    await assert.rejects(access(dataDir), { code: 'ENOENT' })
+  },
+)
+
 test(
   'crash recovery marks an unfinished run interrupted and never replays it',
   { timeout: 30_000 },
   async (t) => {
     const dataDir = await mkdtemp(join(tmpdir(), 'learn-electron-crash-'))
-    let recovered
+    let recovery
     const script = `
     import { startServer } from ${JSON.stringify(MODULE_URL)};
     const engine = {
@@ -647,12 +760,18 @@ test(
       ['--import', 'tsx', '--input-type=module', '-e', script],
       {
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        windowsHide: true,
       },
     )
+    const closed = once(child, 'close')
+    child.stdout.resume()
+    child.stderr.resume()
     t.after(async () => {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-      await recovered?.close()
-      await rm(dataDir, { recursive: true, force: true })
+      await closed
+      await recovery?.close()
+      assert.equal(dirname(resolve(dataDir)), resolve(tmpdir()))
+      await rm(dataDir, { recursive: true, force: true, maxRetries: 5 })
     })
     const [ready] = await once(child, 'message', { signal: AbortSignal.timeout(10_000) })
     const request = client(ready.url)
@@ -660,11 +779,11 @@ test(
     const run = await start(request, conversation.id)
     const before = await (await request(`/conversations/${conversation.id}`)).json()
     assert.equal(before.messages[1].content, 'persisted before crash')
-    const exited = once(child, 'exit')
     child.kill('SIGKILL')
-    await exited
+    await closed
     const fake = engine()
-    recovered = await startServer({ token: TOKEN, dataDir, engine: fake })
+    recovery = recoverServer(t.signal, () => startServer({ token: TOKEN, dataDir, engine: fake }))
+    const recovered = await recovery.ready
     const nextClient = client(recovered.url)
     const snapshot = await (await nextClient(`/conversations/${conversation.id}`)).json()
     assert.equal(snapshot.run.id, run.id)

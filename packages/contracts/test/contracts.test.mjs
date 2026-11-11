@@ -52,6 +52,11 @@ test('start requests normalize message text and retain the idempotency key', () 
     32_000,
   )
   assert.equal(parseStartRun({ message: 'x', requestId: 'a'.repeat(8) }).requestId.length, 8)
+  const expectedTarget = { instanceId: 'provider-a', modelId: 'model-a' }
+  assert.deepEqual(
+    parseStartRun({ message: 'hello', requestId: 'request-0001', expectedTarget }).expectedTarget,
+    expectedTarget,
+  )
 })
 
 test('start requests reject invalid bodies, message bounds and request keys', () => {
@@ -62,6 +67,7 @@ test('start requests reject invalid bodies, message bounds and request keys', ()
     {},
     { message: '  ', requestId: 'request-0001' },
     { message: 'x'.repeat(32_001), requestId: 'request-0001' },
+    { message: 'hello', requestId: 'request-0001', expectedTarget: { instanceId: 'a' } },
     ...['short', 'a'.repeat(129), 'request/0001'].map((requestId) => ({
       message: 'hello',
       requestId,
@@ -85,6 +91,8 @@ test('service metadata validates its version, model and capabilities', () => {
     engine: 'pi',
     model: { provider: 'test', id: 'model' },
     configured: false,
+    selection: null,
+    target: null,
     capabilities: { tools: false },
   }
   assert.deepEqual(parseServiceMeta(meta), meta)

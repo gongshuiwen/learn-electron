@@ -15,6 +15,7 @@ function backendDevBuild(): Plugin {
         './apps/server/src',
         './packages/agent-runtime/src',
         './packages/contracts/src',
+        './packages/model-connections/src',
         './apps/server/package.json',
         './packages/agent-runtime/package.json',
         './scripts/build-server.mjs',

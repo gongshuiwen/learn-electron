@@ -9,7 +9,8 @@ import type {
   StartRunRequest,
 } from '@learn-electron/contracts'
 import { ChatError } from './errors.ts'
-import { migrate } from './migrations.ts'
+import { initializeSchema } from './schema.ts'
+import { parseModelRef, type ModelRef } from '@learn-electron/model-connections'
 
 type Row = Record<string, unknown>
 
@@ -19,6 +20,17 @@ function conversation(row: Row): Conversation {
     title: String(row.title),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+    ...(typeof row.model_selection === 'string'
+      ? { selection: parseModelRef(JSON.parse(row.model_selection)) }
+      : {}),
+    ...(typeof row.connection_id === 'string'
+      ? {
+          binding: {
+            instanceId: row.connection_id,
+            modelId: typeof row.model_id === 'string' ? row.model_id : null,
+          },
+        }
+      : {}),
   }
 }
 
@@ -41,6 +53,9 @@ function run(row: Row): Run {
     updatedAt: String(row.updated_at),
     ...(typeof row.error === 'string' ? { error: row.error } : {}),
     ...(typeof row.error_code === 'string' ? { errorCode: row.error_code } : {}),
+    ...(typeof row.model_instance_id === 'string' && typeof row.model_id === 'string'
+      ? { target: { instanceId: row.model_instance_id, modelId: row.model_id } }
+      : {}),
   }
 }
 
@@ -51,7 +66,7 @@ export class Store {
     this.db = new DatabaseSync(path)
     try {
       this.db.exec('PRAGMA foreign_keys = ON')
-      migrate(this.db, path)
+      initializeSchema(this.db)
       this.db.exec('PRAGMA journal_mode = WAL')
       this.interruptActive()
     } catch (error) {
@@ -79,12 +94,14 @@ export class Store {
       .map(conversation)
   }
 
-  create(): Conversation {
+  create(selection: ModelRef | null = null): Conversation {
     const id = randomUUID()
     const now = new Date().toISOString()
     this.db
-      .prepare('INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)')
-      .run(id, '新对话', now, now)
+      .prepare(
+        'INSERT INTO conversations (id, title, created_at, updated_at, model_selection) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(id, '新对话', now, now, selection ? JSON.stringify(selection) : null)
     return this.getConversation(id)
   }
 
@@ -117,6 +134,18 @@ export class Store {
       .prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?')
       .run(title, new Date().toISOString(), id)
     return this.getConversation(id)
+  }
+
+  selectModel(id: string, selection: ModelRef): void {
+    this.transaction(() => {
+      const snapshot = this.snapshot(id)
+      if (snapshot.conversation.binding || snapshot.messages.length)
+        throw new ChatError('connection_changed', '该会话已使用模型，请新建会话后切换')
+      this.db
+        .prepare('UPDATE conversations SET model_selection = ? WHERE id = ?')
+        .run(JSON.stringify(selection), id)
+      this.bump(id)
+    })
   }
 
   delete(id: string): void {
@@ -158,15 +187,16 @@ export class Store {
   start(
     id: string,
     request: StartRunRequest,
-    connectionId = 'env',
+    target?: ModelRef,
   ): {
     run: Run
     created: boolean
     assistantId: string
     history: Array<{ role: 'user' | 'assistant'; content: string }>
   } {
+    const connectionId = target?.instanceId ?? 'env'
     return this.transaction(() => {
-      this.getConversation(id)
+      const conversation = this.getConversation(id)
       const existing = this.requestRow(id, request)
       if (existing) {
         return {
@@ -185,6 +215,21 @@ export class Store {
       ) {
         throw new ChatError('conversation_busy', '该会话已有任务正在运行')
       }
+      if (
+        !conversation.binding &&
+        conversation.selection &&
+        target &&
+        (conversation.selection.instanceId !== target.instanceId ||
+          conversation.selection.modelId !== target.modelId)
+      )
+        throw new ChatError('connection_changed', '会话模型已改变，请重试发送')
+      if (
+        target &&
+        (!request.expectedTarget ||
+          request.expectedTarget.instanceId !== target.instanceId ||
+          request.expectedTarget.modelId !== target.modelId)
+      )
+        throw new ChatError('connection_changed', '会话模型已改变，请刷新后重试发送')
       const history = this.snapshot(id)
         .messages.filter((item) => item.status === 'complete')
         .map(({ role, content }) => ({ role, content }))
@@ -192,10 +237,17 @@ export class Store {
         .prepare('SELECT connection_id FROM conversations WHERE id = ?')
         .get(id)?.connection_id
       if (binding && binding !== connectionId)
-        throw new ChatError('connection_changed', '此会话属于其他模型连接，请切回原连接或新建会话')
+        throw new ChatError('connection_changed', '该会话已绑定其他供应商实例，请新建会话')
+      const boundModel = this.db
+        .prepare('SELECT model_id FROM conversations WHERE id = ?')
+        .get(id)?.model_id
+      if (boundModel && boundModel !== target?.modelId)
+        throw new ChatError('connection_changed', '该会话已绑定其他模型，请新建会话')
       this.db
-        .prepare('UPDATE conversations SET connection_id = ? WHERE id = ?')
-        .run(connectionId, id)
+        .prepare(
+          'UPDATE conversations SET connection_id = ?, model_id = ?, model_selection = COALESCE(model_selection, ?) WHERE id = ?',
+        )
+        .run(connectionId, target?.modelId ?? null, target ? JSON.stringify(target) : null, id)
       const now = new Date().toISOString()
       const runId = randomUUID()
       const assistantId = randomUUID()
@@ -204,9 +256,21 @@ export class Store {
       insert.run(assistantId, id, 'assistant', '', now, 'streaming')
       this.db
         .prepare(
-          'INSERT INTO runs (id, conversation_id, status, created_at, updated_at, error, request_id, request_message, assistant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO runs (id, conversation_id, status, created_at, updated_at, error, request_id, request_message, assistant_id, model_instance_id, model_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(runId, id, 'running', now, now, null, request.requestId, request.message, assistantId)
+        .run(
+          runId,
+          id,
+          'running',
+          now,
+          now,
+          null,
+          request.requestId,
+          request.message,
+          assistantId,
+          target?.instanceId ?? null,
+          target?.modelId ?? null,
+        )
       this.bump(id)
       return { run: this.getRun(runId), created: true, assistantId, history }
     })

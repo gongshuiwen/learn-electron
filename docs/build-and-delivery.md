@@ -49,4 +49,4 @@ npm run dist
 
 ## 开发构建
 
-开发时由 [main 构建钩子](../electron.vite.config.ts) 监听后端、Runtime 和契约变化，先构建后端，再由 electron-vite 重启应用。
+开发时由 [main 构建钩子](../electron.vite.config.ts) 监听后端、Runtime、连接核心和契约变化，先构建后端，再由 electron-vite 重启应用。

@@ -1,12 +1,9 @@
 import { mkdir, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici8'
-import { InMemoryCredentialStore } from '@earendil-works/pi-ai'
-import { openaiProvider } from '@earendil-works/pi-ai/providers/openai'
+import { EnvHttpProxyAgent, setGlobalDispatcher, type Dispatcher } from 'undici8'
 import {
   createAgentSession,
   createExtensionRuntime,
-  ModelRuntime,
   SessionManager,
   SettingsManager,
   type AgentSession,
@@ -14,10 +11,31 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import type { AgentEngine, EngineInfo, PiEngineOptions } from './index.ts'
 import { ModelError, type ModelErrorCode } from './index.ts'
+import type { ModelTarget } from '@learn-electron/model-connections'
+import { createModelRuntime, modelFailure } from './pi-models.ts'
 
 // The SDK imports Undici 8, replacing Node's environment-proxy dispatcher.
-// Reapply proxy policy here so OAuth and model requests keep the same routing.
-setGlobalDispatcher(new EnvHttpProxyAgent())
+// Reapply proxy policy after SDK imports. Enforce redirects at the dispatcher,
+// including SDKs that do not accept a caller-supplied fetch (Google GenAI).
+const rejectRedirects: Dispatcher.DispatchInterceptor = (dispatch) => (options, handler) =>
+  dispatch(options, {
+    onRequestStart: (...args) => handler.onRequestStart?.(...args),
+    onRequestUpgrade: (...args) => handler.onRequestUpgrade?.(...args),
+    onResponseStart(controller, status, headers, statusMessage) {
+      if ([301, 302, 303, 307, 308].includes(status)) {
+        controller.abort(new Error('Model service redirects are disabled'))
+        return
+      }
+      handler.onResponseStart?.(controller, status, headers, statusMessage)
+    },
+    onResponseData: (...args) => handler.onResponseData?.(...args),
+    onResponseEnd: (...args) => handler.onResponseEnd?.(...args),
+    onResponseError: (...args) => handler.onResponseError?.(...args),
+    onResponseStarted: () => handler.onResponseStarted?.(),
+    onBodySent: (...args) => handler.onBodySent?.(...args),
+    onRequestSent: () => handler.onRequestSent?.(),
+  })
+setGlobalDispatcher(new EnvHttpProxyAgent().compose(rejectRedirects))
 
 const SYSTEM_PROMPT =
   'You are a helpful assistant in a desktop and web chat application. ' +
@@ -48,82 +66,68 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
   await mkdir(cwd, { recursive: true })
   await mkdir(sessionsDir, { recursive: true })
 
-  // No SDK-owned secrets or model file. API keys use the server environment;
-  // subscription access uses the app's token resolver, never a global Pi profile.
-  const runtime = await ModelRuntime.create({
-    credentials: new InMemoryCredentialStore(),
-    modelsPath: null,
-    allowModelNetwork: false,
-  })
-  const subscription = options.subscription
-  if (subscription) {
-    const provider = openaiProvider()
-    runtime.registerNativeProvider({
-      ...provider,
-      getAllModels: () => provider.getModels(),
-      auth: {
-        apiKey: {
-          name: 'ChatGPT plan',
-          check: () =>
-            Promise.resolve(
-              subscription.snapshot() ? { type: 'oauth', source: 'ChatGPT' } : undefined,
-            ),
-          async resolve({ signal }) {
-            const current = subscription.snapshot()
-            if (!current) throw new ModelError('auth_required')
-            return {
-              auth: { apiKey: await subscription.token(current.connectionId, signal) },
-              source: 'ChatGPT',
-            }
-          },
-        },
-      },
-    })
-  }
-  const requestedProvider = subscription ? 'openai' : (options.provider ?? process.env.PI_PROVIDER)
-  const requestedModel = options.model ?? process.env.PI_MODEL
-  const available = runtime.getAvailableSnapshot()
-  const initialModel = available.find(
-    (candidate) =>
-      (!requestedProvider || candidate.provider === requestedProvider) &&
-      (!requestedModel || candidate.id === requestedModel),
-  )
-  const selectedModel = () => {
-    if (!subscription) return initialModel
-    const selected = subscription.snapshot()
-    return selected ? runtime.getPhysicalModel('openai', selected.modelId) : undefined
+  const credentials = options.credentials
+  const cached = new Map<string, { key: string; value: ReturnType<typeof createModelRuntime> }>()
+  function modelRuntime(target: ModelTarget) {
+    const key = `${target.revision}:${target.model.id}`
+    let entry = cached.get(target.instanceId)
+    if (entry?.key !== key) {
+      if (!credentials) throw new ModelError('auth_required')
+      entry = { key, value: createModelRuntime(target, credentials) }
+      cached.set(target.instanceId, entry)
+    }
+    return entry.value
   }
   const active = new Map<string, AgentSession>()
+  const shutdown = new AbortController()
   let closed = false
 
   return {
     meta() {
-      const model = selectedModel()
-      const connection = subscription?.snapshot()
       return Promise.resolve<EngineInfo>({
         engine: 'pi',
-        model: {
-          provider: model?.provider ?? requestedProvider ?? 'unconfigured',
-          id: model?.id ?? requestedModel ?? 'unconfigured',
-        },
-        configured: Boolean(model),
+        model: { provider: 'unconfigured', id: 'unconfigured' },
+        configured: false,
         capabilities: { tools: false },
-        ...(subscription ? { authMode: 'chatgpt' as const } : {}),
-        ...(connection ? { connectionId: connection.connectionId } : {}),
       })
+    },
+    async testConnection(target, signal) {
+      if (closed) throw new Error('模型服务已关闭')
+      const { runtime, model } = await modelRuntime(target)
+      if (closed) throw new Error('模型服务已关闭')
+      try {
+        const result = await runtime.completeSimple(
+          model,
+          { messages: [{ role: 'user', content: 'Reply with OK.', timestamp: Date.now() }] },
+          {
+            signal: AbortSignal.any([signal, shutdown.signal]),
+            maxTokens: Math.min(32, model.maxTokens),
+          },
+        )
+        if (result.stopReason === 'error' || result.stopReason === 'aborted')
+          throw new ModelError(modelFailure(result.errorMessage ?? ''))
+      } catch (error) {
+        if (
+          error instanceof ModelError &&
+          target.kind === 'chatgpt' &&
+          !signal.aborted &&
+          !shutdown.signal.aborted
+        )
+          await credentials?.failed(target, error.code)
+        throw error instanceof ModelError
+          ? error
+          : new ModelError('provider_failed', { cause: error })
+      }
     },
     async run(input) {
       if (closed) throw new Error('模型服务已关闭')
       input.signal.throwIfAborted()
-      const model = selectedModel()
-      if (subscription && input.connectionId !== subscription.snapshot()?.connectionId)
-        throw new ModelError('connection_changed')
-      if (!model) {
-        if (subscription) throw new ModelError('auth_required')
-        throw new Error(
-          '未配置可用模型。请在服务端设置 PI_PROVIDER、PI_MODEL 和对应提供商的 API_KEY。',
-        )
-      }
+      const target = input.target
+      if (!target) throw new ModelError('auth_required')
+      const { runtime, model } = await modelRuntime(target)
+      input.signal.throwIfAborted()
+      if (closed) throw new Error('模型服务已关闭')
+      const subscription = target.kind === 'chatgpt'
       if (!/^[\w-]{1,128}$/.test(input.conversationId)) throw new Error('会话标识无效')
       const sessionDir = join(sessionsDir, input.conversationId)
       await mkdir(sessionDir, { recursive: true })
@@ -162,16 +166,7 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
             event.message.stopReason === 'error' ||
             event.message.stopReason === 'aborted' ||
             Boolean(subscription && event.message.stopReason !== 'stop')
-          if (responseFailed && subscription) {
-            const detail = event.message.errorMessage ?? ''
-            if (/subscription_sharing_usage_limit_exceeded|usage limit/.test(detail))
-              failureCode = 'quota_exceeded'
-            else if (/subscription_sharing_invalid_user|授权已失效/.test(detail))
-              failureCode = 'auth_required'
-            else if (/chatpass_v2_scope_not_authorized|尚未获得/.test(detail))
-              failureCode = 'permission_missing'
-            else if (/model_not_found/.test(detail)) failureCode = 'model_unavailable'
-          }
+          if (responseFailed) failureCode = modelFailure(event.message.errorMessage ?? '')
         }
       })
       const abort = (): void => {
@@ -188,8 +183,8 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
         return { text: session.getLastAssistantText() ?? '' }
       } catch (error) {
         if (input.signal.aborted) throw error
-        if (subscription && error instanceof ModelError) {
-          await subscription.failed(error.code)
+        if (error instanceof ModelError) {
+          if (subscription) await credentials?.failed(target, error.code)
           throw error
         }
         // Provider errors can contain request headers, keys, and endpoint details.
@@ -215,9 +210,11 @@ export async function createPiEngine(options: PiEngineOptions): Promise<AgentEng
     },
     async close() {
       closed = true
+      shutdown.abort()
       await Promise.allSettled([...active.values()].map((session) => session.abort()))
       for (const session of active.values()) session.dispose()
       active.clear()
+      cached.clear()
     },
   }
 }

@@ -87,6 +87,15 @@ for (const operation of ['polling', 'cancelling']) {
       let oldReads = 0
       let cancelCalls = 0
       const starts = []
+      const accounts = [
+        {
+          id: 'old-account',
+          kind: 'chatgpt',
+          name: 'Old',
+          status: 'authorizing',
+          planUsage: false,
+        },
+      ]
       const { page } = await fixture(t, (api) => {
         const handle = api.handle.bind(api)
         api.handle = async (route) => {
@@ -96,6 +105,7 @@ for (const operation of ['polling', 'cancelling']) {
             route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
           const missing = () => {
             pendingLogin = null
+            accounts[0].status = 'signed_out'
             return json(
               { error: { code: 'login_not_found', message: '登录请求不存在，请重新登录' } },
               404,
@@ -107,20 +117,33 @@ for (const operation of ['polling', 'cancelling']) {
               engine: 'pi',
               model: { provider: 'openai', id: 'unconfigured' },
               configured: false,
+              selection: null,
+              target: null,
               capabilities: { tools: false },
               authMode: 'chatgpt',
             })
-          if (path === '/models') return json([])
-          if (path === '/auth/chatgpt')
+          if (path === '/model-providers') {
+            if (request.method() === 'POST')
+              accounts.push({
+                id: 'new-account',
+                kind: 'chatgpt',
+                name: 'New',
+                status: 'signed_out',
+                planUsage: false,
+              })
             return json({
-              enabled: true,
-              activeId: null,
-              profiles: [],
-              ...(pendingLogin ? { pendingLogin } : {}),
+              defaultSelection: null,
+              instances: accounts,
+              chatgpt: { enabled: true, ...(pendingLogin ? { pendingLogin } : {}) },
             })
-          if (path === '/auth/chatgpt/login' && request.method() === 'POST') {
+          }
+          if (
+            path === '/model-providers/new-account/auth/attempts' &&
+            request.method() === 'POST'
+          ) {
             assert.equal(pendingLogin, null)
-            starts.push(request.postDataJSON())
+            starts.push(request.method())
+            accounts.at(-1).status = 'authorizing'
             pendingLogin = {
               id: 'new-login',
               status: 'pending',
@@ -129,8 +152,11 @@ for (const operation of ['polling', 'cancelling']) {
             }
             return json(pendingLogin, 201)
           }
-          if (path === '/auth/chatgpt/logins/old-login') {
-            if (request.method() === 'DELETE') {
+          if (
+            path === '/model-auth-attempts/old-login' ||
+            path === '/model-auth-attempts/old-login/cancel'
+          ) {
+            if (request.method() === 'POST') {
               if (++cancelCalls === 1)
                 return json({ error: { code: 'unavailable', message: '取消暂不可用' } }, 503)
               return missing()
@@ -143,7 +169,7 @@ for (const operation of ['polling', 'cancelling']) {
             }
             return pendingLogin ? json(pendingLogin) : missing()
           }
-          if (path === '/auth/chatgpt/logins/new-login') return json(pendingLogin)
+          if (path === '/model-auth-attempts/new-login') return json(pendingLogin)
           return handle(route)
         }
       })
@@ -152,36 +178,530 @@ for (const operation of ['polling', 'cancelling']) {
         .route('https://auth.openai.com/api/accounts/authorize?**', (route) =>
           route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<p>新的登录请求</p>' }),
         )
-      const start = page.getByRole('button', { name: 'Continue with ChatGPT', exact: true })
+      await page.getByRole('link', { name: '设置', exact: true }).click()
+      const reauthorize = page.getByRole('button', { name: '重新授权 ChatGPT', exact: true })
       const cancel = page.getByRole('button', { name: '取消登录', exact: true })
       await cancel.waitFor()
       if (operation === 'polling') {
         await page.getByText('登录状态暂不可用，正在重新连接…', { exact: true }).waitFor()
-        assert.equal(await start.isDisabled(), true)
+        assert.equal(await reauthorize.isDisabled(), true)
         assert.equal(await cancel.isVisible(), true)
         await page.getByText('登录请求已失效，请重新登录。', { exact: true }).waitFor()
       } else {
         await cancel.click()
         await page.getByText('取消暂不可用', { exact: true }).waitFor()
-        assert.equal(await start.isDisabled(), true)
+        assert.equal(await reauthorize.isDisabled(), true)
         assert.equal(await cancel.isVisible(), true)
         await cancel.click()
       }
       await cancel.waitFor({ state: 'hidden' })
       const readsAfterRecovery = oldReads
+      await page.getByRole('button', { name: '添加账号', exact: true }).click()
+      const form = page.getByRole('dialog', { name: '添加模型提供商' })
+      assert.equal(await form.getByLabel('提供商预设').inputValue(), 'chatgpt')
       const popupEvent = page.context().waitForEvent('page')
       const newPoll = page.waitForResponse((response) =>
-        response.url().endsWith('/auth/chatgpt/logins/new-login'),
+        response.url().endsWith('/model-auth-attempts/new-login'),
       )
-      await start.click()
+      await form.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).click()
       await (await popupEvent).getByText('新的登录请求', { exact: true }).waitFor()
       await newPoll
-      assert.deepEqual(starts, [{}])
+      assert.deepEqual(starts, ['POST'])
       assert.equal(await cancel.isVisible(), true)
       assert.equal(oldReads, readsAfterRecovery)
     },
   )
 }
+
+test(
+  'Web reuses the newly created ChatGPT account after login startup fails',
+  { timeout: 20_000 },
+  async (t) => {
+    const accounts = []
+    const attempts = []
+    let createFailures = 1
+    const retryStarted = Promise.withResolvers()
+    const retryGate = Promise.withResolvers()
+    const { page } = await fixture(t, (api) => {
+      const handle = api.handle.bind(api)
+      api.handle = async (route) => {
+        const request = route.request()
+        const path = new URL(request.url()).pathname.replace('/api/v1', '')
+        const json = (body, status = 200) =>
+          route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+        if (path === '/meta')
+          return json({
+            apiVersion: 1,
+            engine: 'pi',
+            model: { provider: 'unconfigured', id: 'unconfigured' },
+            configured: false,
+            selection: null,
+            target: null,
+            capabilities: { tools: false },
+          })
+        if (path === '/model-providers') {
+          if (request.method() === 'POST') {
+            if (createFailures-- > 0)
+              return json({ error: { code: 'unavailable', message: '创建暂不可用' } }, 503)
+            accounts.push({
+              id: 'account-' + (accounts.length + 1),
+              kind: 'chatgpt',
+              name: '未完成的连接 ' + (accounts.length + 1),
+              status: 'signed_out',
+              planUsage: false,
+            })
+          }
+          return json({ defaultSelection: null, instances: accounts, chatgpt: { enabled: true } })
+        }
+        if (path.endsWith('/auth/attempts')) {
+          attempts.push(path)
+          if (attempts.length === 2) {
+            retryStarted.resolve()
+            await retryGate.promise
+          }
+          return json({ error: { code: 'unavailable', message: '授权暂不可用' } }, 503)
+        }
+        return handle(route)
+      }
+    })
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await page.getByRole('button', { name: '添加提供商', exact: true }).click()
+    const form = page.getByRole('dialog', { name: '添加模型提供商' })
+    await form.getByLabel('提供商预设').selectOption('chatgpt')
+    await form.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).click()
+    await form.getByRole('alert').filter({ hasText: '创建暂不可用' }).waitFor()
+    assert.equal(accounts.length, 0)
+    await form.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).click()
+    await page.getByRole('alert').filter({ hasText: '授权暂不可用' }).waitFor()
+    await page.getByRole('button', { name: '选择 ChatGPT · 未完成的连接 1', exact: true }).waitFor()
+    const retry = page.waitForResponse((response) => response.url().endsWith('/auth/attempts'))
+    try {
+      await page.getByRole('button', { name: '重新授权 ChatGPT', exact: true }).click()
+      await retryStarted.promise
+      await page.getByRole('button', { name: '添加提供商', exact: true }).click()
+      assert.equal(
+        await form.getByRole('button', { name: '保存连接', exact: true }).isDisabled(),
+        true,
+      )
+      await form.getByRole('button', { name: '取消', exact: true }).click()
+      await form.waitFor({ state: 'hidden' })
+    } finally {
+      retryGate.resolve()
+    }
+    await retry
+    await page.getByRole('alert').filter({ hasText: '授权暂不可用' }).waitFor()
+    assert.deepEqual(attempts, [
+      '/model-providers/account-1/auth/attempts',
+      '/model-providers/account-1/auth/attempts',
+    ])
+    assert.equal(accounts.length, 1)
+  },
+)
+
+test(
+  'Web browses provider instances without selecting a default and scopes account logout',
+  { timeout: 20_000 },
+  async (t) => {
+    let defaultSelection = { instanceId: 'account-a', modelId: 'model-account-a' }
+    let connectionReads = 0
+    const signedOut = new Set()
+    const selections = []
+    const profiles = ['account-a', 'account-b'].map((id) => ({
+      id,
+      kind: 'chatgpt',
+      name: id,
+      status: 'connected',
+      planUsage: true,
+    }))
+    const keyConnection = {
+      id: 'api-connection',
+      kind: 'endpoint',
+      revision: 1,
+      name: 'API gateway',
+      protocol: 'openai-chat',
+      baseUrl: 'https://gateway.example/v1',
+      authentication: 'api-key',
+      compatibility: {},
+      models: [{ id: 'api-model', name: 'API model', contextWindow: 32768, maxOutputTokens: 4096 }],
+      hasCredential: true,
+      hasHeaders: false,
+    }
+    const { page } = await fixture(t, (api) => {
+      const handle = api.handle.bind(api)
+      api.handle = (route) => {
+        const request = route.request()
+        const path = new URL(request.url()).pathname.replace('/api/v1', '')
+        const json = (body) =>
+          route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+        const meta = () => ({
+          apiVersion: 1,
+          engine: 'pi',
+          model: { provider: 'test', id: defaultSelection.modelId },
+          configured: !signedOut.has(defaultSelection.instanceId),
+          selection: null,
+          target: null,
+          capabilities: { tools: false },
+        })
+        if (path === '/meta') return json(meta())
+        api.handleModelState = () =>
+          json({
+            defaultSelection,
+            chatgpt: { enabled: true },
+            instances: [
+              keyConnection,
+              ...profiles.map((profile) =>
+                signedOut.has(profile.id)
+                  ? { ...profile, status: 'signed_out', planUsage: false }
+                  : profile,
+              ),
+            ],
+          })
+        if (path === '/model-providers') {
+          connectionReads++
+          return api.handleModelState()
+        }
+        const models = /^\/model-providers\/(account-[ab])\/models$/.exec(path)
+        if (models) return json([{ id: 'model-' + models[1], name: 'Model ' + models[1] }])
+        if (path === '/model' && request.method() === 'PUT') {
+          defaultSelection = request.postDataJSON()
+          assert.equal(
+            defaultSelection.modelId,
+            defaultSelection.instanceId === 'api-connection'
+              ? 'api-model'
+              : 'model-' + defaultSelection.instanceId,
+          )
+          selections.push(defaultSelection)
+          return api.handleModelState()
+        }
+        if (path === '/model-providers/account-b/auth/logout') {
+          assert.equal(request.method(), 'POST')
+          signedOut.add('account-b')
+          return json({ revoked: true })
+        }
+        return handle(route)
+      }
+    })
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await page
+      .getByRole('combobox', { name: '当前模型', exact: true })
+      .locator('option')
+      .filter({ hasText: 'Model account-a' })
+      .waitFor({ state: 'attached' })
+    assert.equal(connectionReads, 1, 'One authoritative initial connection read')
+    await page.getByRole('button', { name: '选择 ChatGPT · account-b', exact: true }).click()
+    await page
+      .getByRole('combobox', { name: '当前模型', exact: true })
+      .locator('option')
+      .filter({ hasText: 'Model account-b' })
+      .waitFor({ state: 'attached' })
+    assert.equal(
+      defaultSelection.instanceId,
+      'account-a',
+      'Browsing an account does not activate it',
+    )
+    assert.deepEqual(selections, [])
+    await page.getByRole('button', { name: '设为默认模型', exact: true }).click()
+    await page.getByText('新会话默认：account-b · model-account-b', { exact: true }).waitFor()
+    assert.equal(connectionReads, 2)
+    await page.getByRole('button', { name: '选择 API gateway', exact: true }).click()
+    await page.getByRole('button', { name: '设为默认模型', exact: true }).click()
+    await page.getByText('新会话默认：API gateway · api-model', { exact: true }).waitFor()
+    await page.getByRole('button', { name: '选择 ChatGPT · account-b', exact: true }).click()
+    await page.getByRole('button', { name: '退出登录', exact: true }).click()
+    await page.getByRole('button', { name: '退出登录', exact: true }).waitFor({ state: 'hidden' })
+    assert.equal(defaultSelection.instanceId, 'api-connection')
+    assert.equal(connectionReads, 4)
+    assert.deepEqual(selections, [
+      { instanceId: 'account-b', modelId: 'model-account-b' },
+      { instanceId: 'api-connection', modelId: 'api-model' },
+    ])
+    await page.getByRole('link', { name: '返回聊天', exact: true }).click()
+    assert.equal(
+      await page.getByRole('textbox', { name: '发送消息', exact: true }).isDisabled(),
+      false,
+    )
+  },
+)
+
+test(
+  'Web shows availability for each ChatGPT account without disabling other models',
+  { timeout: 20_000 },
+  async (t) => {
+    const endpoint = {
+      id: 'gateway',
+      kind: 'endpoint',
+      revision: 1,
+      vendor: 'custom',
+      name: 'Gateway',
+      protocol: 'openai-chat',
+      baseUrl: 'https://gateway.example/v1',
+      authentication: 'none',
+      compatibility: {},
+      models: [
+        { id: 'gateway-model', name: 'Gateway model', contextWindow: 32768, maxOutputTokens: 4096 },
+      ],
+      hasCredential: false,
+      hasHeaders: false,
+    }
+    const needsKey = { ...endpoint, id: 'needs-key', name: 'Needs key', authentication: 'api-key' }
+    const noModels = { ...endpoint, id: 'no-models', name: 'Empty catalog', models: [] }
+    const profiles = [
+      { id: 'account-a', status: 'authorizing' },
+      { id: 'account-b', status: 'busy' },
+      { id: 'account-c', status: 'connected' },
+    ].map((profile) => ({
+      ...profile,
+      kind: 'chatgpt',
+      name: profile.id,
+      planUsage: true,
+    }))
+    const selection = { instanceId: endpoint.id, modelId: endpoint.models[0].id }
+    const pendingLogin = {
+      id: 'pending-login',
+      status: 'pending',
+      authorizationUrl: 'https://auth.openai.com/api/accounts/authorize',
+      expiresAt: new Date(Date.now() + 900_000).toISOString(),
+    }
+    let completed = false
+    let polls = 0
+    const { page } = await fixture(t, (api) => {
+      const handle = api.handle.bind(api)
+      api.handle = (route) => {
+        const path = new URL(route.request().url()).pathname.replace('/api/v1', '')
+        const json = (body) =>
+          route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+        if (path === '/meta')
+          return json({
+            apiVersion: 1,
+            engine: 'pi',
+            model: { provider: endpoint.name, id: selection.modelId },
+            configured: true,
+            selection,
+            target: selection,
+            capabilities: { tools: false },
+          })
+        if (path === '/model-providers')
+          return json({
+            defaultSelection: selection,
+            instances: [endpoint, needsKey, noModels, ...profiles],
+            chatgpt: { enabled: true, ...(!completed ? { pendingLogin } : {}) },
+          })
+        if (
+          ['/model-providers/account-a/models', '/model-providers/account-c/models'].includes(path)
+        )
+          return json([{ id: 'chat-model', name: 'Chat model' }])
+        if (path === '/model-auth-attempts/pending-login') {
+          polls++
+          if (!completed) return json(pendingLogin)
+          profiles[0].status = 'connected'
+          return json({ ...pendingLogin, status: 'completed', instanceId: 'account-a' })
+        }
+        return handle(route)
+      }
+    })
+    await page.getByRole('button', { name: '选择聊天模型', exact: true }).click()
+    const picker = page.getByRole('dialog', { name: '聊天模型选择', exact: true })
+    const select = picker.getByLabel('供应商实例')
+    const use = picker.getByRole('button', { name: '使用此模型', exact: true })
+    await select.selectOption('account-a')
+    await picker.getByText('该账号正在授权，请完成或取消登录。', { exact: true }).waitFor()
+    assert.equal(await use.isDisabled(), true)
+    await select.selectOption('account-b')
+    await picker.getByText('该账号正在更新，请稍后再试。', { exact: true }).waitFor()
+    assert.equal(await use.isDisabled(), true)
+    await select.selectOption('account-c')
+    await picker
+      .getByLabel('聊天模型')
+      .locator('option')
+      .filter({ hasText: 'Chat model' })
+      .waitFor({ state: 'attached' })
+    assert.equal(await use.isEnabled(), true)
+    await page.keyboard.press('Escape')
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await page.getByRole('button', { name: '选择 Needs key', exact: true }).click()
+    await page.getByText('请先编辑连接并补充 API Key，才能使用此连接。', { exact: true }).waitFor()
+    assert.equal(
+      await page.getByRole('button', { name: '获取模型', exact: true }).isDisabled(),
+      true,
+    )
+    await page.getByRole('button', { name: '选择 Empty catalog', exact: true }).click()
+    await page.getByText('暂无模型，请获取模型或编辑连接手动添加。', { exact: true }).waitFor()
+    assert.equal(
+      await page.getByRole('button', { name: '获取模型', exact: true }).isEnabled(),
+      true,
+    )
+    assert.equal(
+      await page.getByRole('button', { name: '测试连接', exact: true }).isDisabled(),
+      true,
+    )
+    await page.getByRole('button', { name: '选择 ChatGPT · account-a', exact: true }).click()
+    await page.getByText('请在系统浏览器中完成此账号的授权…', { exact: true }).waitFor()
+    await page.getByText('请先完成 ChatGPT 授权，再选择模型。', { exact: true }).waitFor()
+    const accountBox = await page.getByRole('region', { name: 'ChatGPT 连接' }).boundingBox()
+    const modelBox = await page.getByRole('combobox', { name: '当前模型' }).boundingBox()
+    assert.ok(accountBox.y + accountBox.height <= modelBox.y)
+    await page.getByRole('button', { name: '选择 ChatGPT · account-b', exact: true }).click()
+    await page.getByText('此账号正在更新，请稍后再试。', { exact: true }).waitFor()
+    await page.getByRole('button', { name: '选择 ChatGPT · account-c', exact: true }).click()
+    await page.getByText('已授权 · 可使用 ChatGPT 计划', { exact: true }).waitFor()
+    const gateway = page.getByRole('button', { name: '选择 Gateway', exact: true })
+    await gateway.click()
+    assert.equal(await page.getByRole('region', { name: 'ChatGPT 连接' }).count(), 0)
+    completed = true
+    await page
+      .getByRole('button', { name: '选择 ChatGPT · account-a', exact: true })
+      .getByText('ChatGPT · 已授权', { exact: true })
+      .waitFor()
+    assert.ok(polls > 0, 'Login continues while another provider is selected')
+    assert.equal(await gateway.getAttribute('aria-pressed'), 'true')
+    assert.equal(await page.getByRole('region', { name: 'ChatGPT 连接' }).count(), 0)
+    await page.getByText('ChatGPT 登录成功，可在供应商列表中查看账号。', { exact: true }).waitFor()
+    await page.getByRole('button', { name: '选择 ChatGPT · account-c', exact: true }).click()
+    assert.equal(await page.getByRole('button', { name: '知道了', exact: true }).count(), 0)
+    await page.getByRole('button', { name: '选择 ChatGPT · account-a', exact: true }).click()
+    await page.getByRole('button', { name: '知道了', exact: true }).waitFor()
+  },
+)
+
+test(
+  'Web ignores stale model status and sends the visible selection when the default changes',
+  { timeout: 30_000 },
+  async (t) => {
+    const a = { instanceId: 'provider-a', modelId: 'model-a' }
+    const b = { instanceId: 'provider-b', modelId: 'model-b' }
+    let selected = a
+    let phase = 'initial'
+    let oldHeld = false
+    let returnHeld = false
+    const oldStarted = Promise.withResolvers()
+    const oldGate = Promise.withResolvers()
+    const oldDone = Promise.withResolvers()
+    const newDone = Promise.withResolvers()
+    const returnStarted = Promise.withResolvers()
+    const returnGate = Promise.withResolvers()
+    const created = Promise.withResolvers()
+    const submitted = Promise.withResolvers()
+    t.after(() => {
+      oldGate.resolve()
+      returnGate.resolve()
+    })
+    const instances = [a, b].map((ref) => ({
+      id: ref.instanceId,
+      kind: 'endpoint',
+      revision: 1,
+      vendor: 'custom',
+      name: ref === a ? 'Gateway A' : 'Gateway B',
+      protocol: 'openai-chat',
+      baseUrl: 'https://gateway.example/v1',
+      authentication: 'none',
+      compatibility: {},
+      models: [{ id: ref.modelId, name: ref.modelId, contextWindow: 32768, maxOutputTokens: 4096 }],
+      hasCredential: false,
+      hasHeaders: false,
+    }))
+    const { page, input } = await fixture(t, (api) => {
+      const handle = api.handle.bind(api)
+      api.handle = async (route) => {
+        const request = route.request()
+        const path = new URL(request.url()).pathname.replace('/api/v1', '')
+        const json = (body) =>
+          route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+        const state = () => ({ defaultSelection: selected, instances, chatgpt: { enabled: true } })
+        if (path === '/meta') {
+          const snapshot = {
+            apiVersion: 1,
+            engine: 'pi',
+            model: {
+              provider: selected.instanceId === a.instanceId ? 'Gateway A' : 'Gateway B',
+              id: selected.modelId,
+            },
+            configured: true,
+            selection: selected,
+            target: selected,
+            capabilities: { tools: false },
+          }
+          if (phase === 'old' && !oldHeld) {
+            oldHeld = true
+            oldStarted.resolve()
+            await oldGate.promise
+            await json(snapshot)
+            oldDone.resolve()
+            return
+          }
+          if (phase === 'return' && !returnHeld) {
+            returnHeld = true
+            returnStarted.resolve()
+            await returnGate.promise
+            return json(snapshot)
+          }
+          await json(snapshot)
+          if (phase === 'old' && snapshot.target.instanceId === b.instanceId) newDone.resolve()
+          return
+        }
+        if (path === '/model-providers') return json(state())
+        if (path === '/model' && request.method() === 'PUT') {
+          selected = request.postDataJSON()
+          return json(state())
+        }
+        if (path === '/conversations' && request.method() === 'POST')
+          created.resolve(request.postDataJSON())
+        if (path.endsWith('/runs') && request.method() === 'POST')
+          submitted.resolve(request.postDataJSON())
+        return handle(route)
+      }
+    })
+    await page.locator('.chat-header').getByText('Gateway A / model-a', { exact: true }).waitFor()
+    phase = 'old'
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await oldStarted.promise
+    await page.getByRole('button', { name: '选择 Gateway B', exact: true }).click()
+    await page.getByRole('button', { name: '设为默认模型', exact: true }).click()
+    await page.getByText('新会话默认：Gateway B · model-b', { exact: true }).waitFor()
+    await newDone.promise
+    oldGate.resolve()
+    await oldDone.promise
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)),
+        ),
+    )
+    phase = 'return'
+    await page.getByRole('link', { name: '返回聊天', exact: true }).click()
+    await returnStarted.promise
+    await page.locator('.chat-header').getByText('Gateway B / model-b', { exact: true }).waitFor()
+    selected = a
+    await input.fill('发送给当前显示的模型')
+    await page.getByRole('button', { name: '发送消息', exact: true }).click()
+    assert.deepEqual((await created.promise).selection, b)
+    assert.deepEqual((await submitted.promise).expectedTarget, b)
+    returnGate.resolve()
+  },
+)
+
+test(
+  'Web settings has its own route, preserves drafts across history navigation and restores after reload',
+  { timeout: 20_000 },
+  async (t) => {
+    const { page, input } = await fixture(t)
+    await input.fill('保留在聊天中的草稿')
+    const timeOrigin = await page.evaluate(() => performance.timeOrigin)
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await page.getByRole('heading', { name: '设置', exact: true }).waitFor()
+    assert.equal(new URL(page.url()).hash, '#/settings')
+    assert.equal(await input.count(), 0)
+    await page.goBack()
+    assert.equal(await input.inputValue(), '保留在聊天中的草稿')
+    assert.equal(await page.evaluate(() => performance.timeOrigin), timeOrigin)
+    await page.goForward()
+    await page.getByRole('heading', { name: '设置', exact: true }).waitFor()
+    await page.reload()
+    await page.getByRole('heading', { name: '设置', exact: true }).waitFor()
+    await page.getByRole('button', { name: '新建对话', exact: true }).click()
+    await page.getByRole('heading', { name: '新对话', exact: true }).waitFor()
+    assert.equal(new URL(page.url()).hash, '#/')
+  },
+)
 
 test(
   'Web theme persists and follows the system without an Electron bridge',
@@ -250,6 +770,16 @@ test(
       .getByText('你好', { exact: true })
       .waitFor()
     await page.waitForResponse((response) => response.url().endsWith('/events'))
+    await page.getByRole('textbox', { name: '发送消息', exact: true }).fill('生成时保留的草稿')
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await page.getByRole('heading', { name: '设置', exact: true }).waitFor()
+    await page.getByRole('link', { name: '返回聊天', exact: true }).click()
+    await page.getByRole('button', { name: '停止生成', exact: true }).waitFor()
+    assert.equal(
+      await page.getByRole('textbox', { name: '发送消息', exact: true }).inputValue(),
+      '生成时保留的草稿',
+    )
+    assert.equal(api.runCount, 1)
     assert.equal(await page.getByRole('article', { name: '助手回复' }).count(), 1)
     const before = api.eventReads
     const resumed = page.waitForResponse((response) => response.url().endsWith('/events'))
@@ -402,7 +932,7 @@ for (const behavior of ['incompatible-events', 'invalid-payload', 'event-errors'
 
 test('Web disables sending when no model is configured', { timeout: 30_000 }, async (t) => {
   const { page, input } = await fixture(t, (api) => api.setConfigured(false))
-  await page.getByRole('status').filter({ hasText: '尚未配置模型' }).waitFor()
+  await page.getByRole('status').filter({ hasText: '会话模型不可用' }).waitFor()
   assert.equal(await input.isDisabled(), true)
 })
 

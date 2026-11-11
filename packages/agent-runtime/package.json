@@ -10,6 +10,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@learn-electron/model-connections": "*",
     "@earendil-works/pi-ai": "1.5.0",
     "@earendil-works/pi-coding-agent": "1.5.0",
     "undici8": "npm:undici@8.12.3"

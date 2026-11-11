@@ -13,6 +13,7 @@ import type {
   RunEvent,
   ServiceMeta,
 } from '@learn-electron/contracts'
+import type { ModelRef } from '@learn-electron/contracts/models'
 import { readRunEvents, reconnectDelay } from './api'
 import { ApiRequestError, ProtocolError, request } from '@/lib/api'
 
@@ -94,15 +95,29 @@ export function useChat() {
   const [reload, setReload] = useState(0)
   const [reconnect, setReconnect] = useState(0)
   const selectedRef = useRef<string | null>(null)
+  const metaRequest = useRef(0)
   const loadController = useRef<AbortController | null>(null)
   const alive = useRef(true)
-  const submission = useRef<{ conversationId: string; message: string; requestId: string } | null>(
-    null,
-  )
+  const submission = useRef<{
+    conversationId: string
+    message: string
+    requestId: string
+    expectedTarget: ModelRef | null
+  } | null>(null)
 
   const refreshMeta = useCallback(async () => {
-    const service = await request('/meta', parseServiceMeta)
-    if (alive.current) setMeta(service)
+    const id = selectedRef.current
+    const requestId = ++metaRequest.current
+    const [service, detail] = await Promise.all([
+      request('/meta', parseServiceMeta),
+      id
+        ? request(`/conversations/${encodeURIComponent(id)}`, parseConversationSnapshot)
+        : Promise.resolve(null),
+    ])
+    if (!alive.current || requestId !== metaRequest.current) return
+    setMeta(service)
+    if (detail && selectedRef.current === id)
+      setSnapshot((current) => (current && current.sequence > detail.sequence ? current : detail))
   }, [])
 
   const selectConversation = useCallback((id: string | null) => {
@@ -120,13 +135,14 @@ export function useChat() {
   useEffect(() => {
     alive.current = true
     const controller = new AbortController()
+    const requestId = ++metaRequest.current
     void Promise.all([
       request('/meta', parseServiceMeta, { signal: controller.signal }),
       request('/conversations', parseConversations, { signal: controller.signal }),
     ])
       .then(([service, list]) => {
         if (controller.signal.aborted) return
-        setMeta(service)
+        if (requestId === metaRequest.current) setMeta(service)
         setConversations(list)
         const remembered = savedSelection()
         const next = list.find((item) => item.id === remembered)?.id ?? list[0]?.id ?? null
@@ -135,7 +151,7 @@ export function useChat() {
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) {
-          setMeta(null)
+          if (requestId === metaRequest.current) setMeta(null)
           setError(errorMessage(cause))
           setLoading(false)
         }
@@ -209,35 +225,72 @@ export function useChat() {
     return () => controller.abort()
   }, [runId, active, selectedId, reconnect])
 
-  async function createConversation(): Promise<void> {
+  async function createConversation(selection?: ModelRef): Promise<boolean> {
     setPending(true)
     setError(null)
     try {
       const conversation = await request('/conversations', parseConversation, {
         method: 'POST',
-        body: '{}',
+        body: JSON.stringify(selection ? { selection } : {}),
       })
-      if (!alive.current) return
+      if (!alive.current) return false
       setConversations((list) => [conversation, ...list])
       selectConversation(conversation.id)
+      return true
     } catch (cause) {
       if (alive.current) setError(errorMessage(cause))
+      return false
     } finally {
       if (alive.current) setPending(false)
     }
   }
 
+  async function chooseModel(selection: ModelRef): Promise<boolean> {
+    if (pending || loading || active) return false
+    const id = selectedRef.current
+    if (!id || snapshot?.conversation.binding || snapshot?.messages.length)
+      return createConversation(selection)
+    setPending(true)
+    setError(null)
+    try {
+      const detail = await request(
+        `/conversations/${encodeURIComponent(id)}/model`,
+        parseConversationSnapshot,
+        {
+          method: 'PUT',
+          body: JSON.stringify(selection),
+        },
+      )
+      if (!alive.current) return false
+      if (selectedRef.current === id) {
+        loadController.current?.abort()
+        setSnapshot(detail)
+      }
+      submission.current = null
+      setConversations((list) => updateConversation(list, detail.conversation))
+      return true
+    } catch (cause) {
+      if (alive.current) setError(errorMessage(cause))
+      return false
+    } finally {
+      if (alive.current) setPending(false)
+    }
+  }
+
+  const model = snapshot?.model ?? meta
+
   async function send(message: string): Promise<boolean> {
     const text = message.trim()
-    if (!text || active || pending || !meta?.configured) return false
+    if (!text || active || pending || !model?.configured) return false
     setPending(true)
     setError(null)
     let id = selectedRef.current
     try {
+      if (meta?.engine === 'pi' && !model.target) throw new Error('当前模型不可用，请重新选择。')
       if (!id) {
         const conversation = await request('/conversations', parseConversation, {
           method: 'POST',
-          body: '{}',
+          body: JSON.stringify(model.target ? { selection: model.target } : {}),
         })
         if (!alive.current) return false
         id = conversation.id
@@ -249,11 +302,20 @@ export function useChat() {
       const attempt =
         submission.current?.conversationId === id && submission.current.message === text
           ? submission.current
-          : { conversationId: id, message: text, requestId: crypto.randomUUID() }
+          : {
+              conversationId: id,
+              message: text,
+              requestId: crypto.randomUUID(),
+              expectedTarget: model.target,
+            }
       submission.current = attempt
       const run = await request(`/conversations/${encodeURIComponent(id)}/runs`, parseRun, {
         method: 'POST',
-        body: JSON.stringify({ message: text, requestId: attempt.requestId }),
+        body: JSON.stringify({
+          message: text,
+          requestId: attempt.requestId,
+          ...(attempt.expectedTarget ? { expectedTarget: attempt.expectedTarget } : {}),
+        }),
       })
       const detail = await request(
         `/conversations/${encodeURIComponent(id)}`,
@@ -269,6 +331,8 @@ export function useChat() {
       setConversations((list) => updateConversation(list, detail.conversation))
       return true
     } catch (cause) {
+      if (cause instanceof ApiRequestError && cause.code === 'connection_changed')
+        submission.current = null
       if (alive.current) {
         setError(errorMessage(cause))
         setLoading(false)
@@ -343,6 +407,7 @@ export function useChat() {
 
   return {
     meta,
+    model,
     conversations,
     selectedId,
     snapshot,
@@ -353,6 +418,7 @@ export function useChat() {
     connection,
     selectConversation,
     createConversation,
+    chooseModel,
     send,
     cancel,
     rename,

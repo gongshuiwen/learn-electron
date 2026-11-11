@@ -79,6 +79,7 @@ test(
     await page.evaluate(() => {
       window.location.hash = '/settings'
     })
+    await page.getByRole('heading', { name: '设置', exact: true }).waitFor()
     assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'system')
 
     // Only the fragment may vary; a changed query must still fail the sender check.
@@ -101,5 +102,8 @@ test(
     assert.equal(page.url(), routeURL)
     await page.locator('#root > *').first().waitFor()
     assert.equal(await page.evaluate(() => window.electronAPI.getTheme()), 'system')
+    await page.getByRole('heading', { name: '设置', exact: true }).waitFor()
+    await page.getByRole('link', { name: '返回聊天', exact: true }).click()
+    await page.getByRole('textbox', { name: '发送消息', exact: true }).waitFor()
   },
 )

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { once } from 'node:events'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { ChatGPTOAuth, CHATGPT_SCOPE } from '../../src/chatgpt/oauth.ts'
 import { getOpenAIModels } from '@learn-electron/agent-runtime'
@@ -24,6 +25,8 @@ export async function oauthFixture(t) {
     resource: '',
     modelId,
     calls: 0,
+    holdResponse: false,
+    responseGate: null,
     subject: 'test-user',
     revocationFails: false,
   }
@@ -122,6 +125,11 @@ export async function oauthFixture(t) {
           content_index: 0,
           delta: text,
         })
+        if (fixture.holdResponse) {
+          fixture.responseGate = Promise.withResolvers()
+          await Promise.race([fixture.responseGate.promise, once(response, 'close')])
+          if (response.destroyed) return
+        }
         if (fixture.responseError === 'incomplete')
           emit({
             type: 'response.incomplete',
@@ -182,7 +190,7 @@ export async function oauthFixture(t) {
           : params.get('client_id'),
       ...overrides,
     }).toString()
-    return fetch(callback)
+    return fetch(callback, { signal: t.signal })
   }
   fixture.sign = async (claims, options = {}) =>
     new SignJWT(claims)

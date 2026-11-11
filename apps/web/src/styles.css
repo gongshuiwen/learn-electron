@@ -29,11 +29,134 @@
     @apply flex h-dvh bg-stone-50 dark:bg-stone-950;
   }
   .sidebar {
-    position: relative;
     @apply flex w-64 shrink-0 flex-col overflow-y-auto border-r border-stone-200 bg-stone-100/80 p-5 dark:border-stone-800 dark:bg-stone-900/50;
   }
-  .chatgpt-toggle {
-    display: none;
+  .settings-link {
+    @apply mb-4 flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/70 focus-visible:outline-2 focus-visible:outline-teal-600 dark:text-stone-300 dark:hover:bg-stone-800;
+  }
+  .settings-link[aria-current='page'] {
+    @apply bg-teal-50 font-medium text-teal-800 dark:bg-teal-950 dark:text-teal-200;
+  }
+  .settings-page {
+    @apply flex h-dvh min-h-0 min-w-0 flex-1 flex-col;
+  }
+  .settings-header {
+    @apply flex min-h-24 shrink-0 flex-wrap items-center justify-between gap-4 border-b border-stone-200 px-8 py-5 dark:border-stone-800;
+  }
+  .settings-header h1 {
+    @apply text-xl font-semibold tracking-tight outline-none;
+  }
+  .settings-header p {
+    @apply mt-1 text-sm text-stone-500 dark:text-stone-400;
+  }
+  .back-to-chat {
+    @apply inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-teal-600 dark:text-stone-300 dark:hover:bg-stone-800;
+  }
+  .settings-scroll {
+    @apply min-h-0 flex-1 overflow-y-auto;
+  }
+  .settings-content {
+    @apply mx-auto w-full max-w-4xl px-8 py-8;
+  }
+  .settings-section {
+    @apply break-words border-b border-stone-200 pb-8 text-sm dark:border-stone-800;
+  }
+  .settings-section h2 {
+    @apply text-base font-semibold;
+  }
+  .connection-heading {
+    @apply flex flex-wrap items-start justify-between gap-4;
+  }
+  .connection-heading > div {
+    @apply min-w-0 flex-1;
+  }
+  .connection-heading p {
+    @apply mt-2 leading-6 text-stone-500 dark:text-stone-400;
+  }
+  .connection-actions {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .model-connections {
+    @apply space-y-6 text-sm;
+  }
+  .provider-default {
+    @apply break-words border-l-2 border-teal-600 pl-3 text-sm leading-6 text-stone-500 dark:text-stone-400;
+  }
+  .provider-notice {
+    @apply border-l-2 border-stone-300 pl-3 text-sm leading-6 text-stone-700 dark:border-stone-600 dark:text-stone-300;
+  }
+  .provider-layout {
+    @apply grid min-w-0 grid-cols-1 gap-8 lg:grid-cols-[12rem_minmax(0,1fr)];
+  }
+  .provider-list {
+    @apply flex min-w-0 flex-col gap-1;
+  }
+  .provider-list > p {
+    @apply px-3 py-4 text-xs leading-6 text-stone-500 dark:text-stone-400;
+  }
+  .provider-empty {
+    @apply py-4 text-sm leading-6 text-stone-500 dark:text-stone-400;
+  }
+  .provider-empty p:first-child {
+    @apply font-medium text-stone-900 dark:text-stone-100;
+  }
+  .provider-action {
+    @apply rounded-md px-2 py-2 text-sm text-stone-600 hover:bg-stone-100 hover:text-stone-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100;
+  }
+  .provider-list > button {
+    @apply min-w-0 rounded-lg border border-transparent px-3 py-3 text-left hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-teal-600 disabled:opacity-60 dark:hover:bg-stone-800;
+  }
+  .provider-list > button[aria-pressed='true'] {
+    @apply border-teal-700/20 bg-teal-700/5 text-teal-900 dark:border-teal-500/30 dark:bg-teal-500/10 dark:text-teal-200;
+  }
+  .provider-list small {
+    @apply shrink-0 text-[10px] font-normal text-teal-700 dark:text-teal-400;
+  }
+  .provider-detail {
+    @apply min-w-0 space-y-6;
+  }
+  .provider-info {
+    @apply space-y-2 text-sm;
+  }
+  .provider-info > div {
+    @apply grid grid-cols-[4rem_minmax(0,1fr)] gap-3;
+  }
+  .provider-info dt {
+    @apply text-stone-500 dark:text-stone-400;
+  }
+  .model-connections select {
+    @apply w-full rounded-md border border-stone-300 bg-stone-50 p-2 focus-visible:outline-2 focus-visible:outline-teal-700 disabled:opacity-60 dark:border-stone-600 dark:bg-stone-900;
+  }
+  .connection-dialog {
+    width: min(38rem, calc(100% - 2rem));
+    @apply m-auto max-h-[90dvh] overflow-y-auto rounded-2xl border border-stone-300 bg-stone-50 p-6 text-stone-900 shadow-xl dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100;
+  }
+  .connection-dialog::backdrop {
+    background: rgb(0 0 0 / 45%);
+  }
+  .connection-form {
+    @apply space-y-5;
+  }
+  .connection-form h2 {
+    @apply text-lg font-semibold;
+  }
+  .connection-form p:not([role='alert']),
+  .connection-form small {
+    @apply block text-xs leading-6 text-stone-500 dark:text-stone-400;
+  }
+  .connection-form label {
+    @apply grid gap-1 text-sm;
+  }
+  .connection-form input:not([type='checkbox']),
+  .connection-form textarea,
+  .connection-form select {
+    @apply w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:opacity-60 read-only:text-stone-500 dark:border-stone-600 dark:bg-stone-950;
+  }
+  .connection-columns {
+    @apply grid grid-cols-1 gap-4 sm:grid-cols-2;
+  }
+  .connection-form .connection-checkbox {
+    @apply flex items-center gap-2 text-xs;
   }
   .brand {
     @apply mb-8 flex items-center gap-3 px-1;
@@ -51,7 +174,7 @@
     @apply mb-3 mt-8 flex items-center justify-between px-3 text-[11px] text-stone-400;
   }
   .conversation-list {
-    @apply flex-1 space-y-1 overflow-y-auto;
+    @apply min-h-12 flex-1 space-y-1 overflow-y-auto;
   }
   .conversation-item {
     @apply flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-xs text-stone-500 transition-colors hover:bg-stone-200/60 dark:hover:bg-stone-800;
@@ -99,7 +222,7 @@
     @apply mx-auto w-full max-w-3xl shrink-0 px-6 pb-5 pt-3;
   }
   .composer {
-    @apply rounded-2xl border border-stone-200 bg-white p-4 shadow-[0_4px_24px_-8px_#0000000d] focus-within:border-teal-600/60 dark:border-stone-700 dark:bg-stone-900;
+    @apply relative rounded-2xl border border-stone-200 bg-white p-4 shadow-[0_4px_24px_-8px_#0000000d] focus-within:border-teal-600/60 dark:border-stone-700 dark:bg-stone-900;
   }
   .composer textarea {
     @apply block max-h-48 min-h-16 w-full resize-y bg-transparent px-1 text-sm leading-7 outline-none placeholder:text-stone-400 disabled:opacity-60;
@@ -109,6 +232,34 @@
   }
   .composer-bottom > span {
     @apply text-[10px] text-stone-400;
+  }
+  .composer-actions {
+    @apply ml-auto flex min-w-0 items-center gap-2;
+  }
+  .composer-shortcuts {
+    @apply hidden sm:inline;
+  }
+  .model-picker > summary {
+    @apply flex max-w-[min(16rem,35vw)] cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-2 text-xs text-stone-500 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-teal-600 dark:text-stone-400 dark:hover:bg-stone-800;
+  }
+  .model-picker > summary[aria-disabled='true'] {
+    @apply cursor-default opacity-50;
+  }
+  .model-picker-panel {
+    @apply absolute bottom-[calc(100%+0.5rem)] right-0 z-20 grid max-h-[55dvh] w-[min(22rem,calc(100vw-3rem))] gap-4 overflow-y-auto rounded-xl border border-stone-200 bg-white p-4 text-sm text-stone-900 shadow-lg dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100;
+  }
+  .model-picker-panel p {
+    @apply text-xs leading-5 text-stone-500 dark:text-stone-400;
+  }
+  .model-picker-panel a,
+  .model-picker-panel [role='alert'] button {
+    @apply text-xs text-teal-700 underline dark:text-teal-400;
+  }
+  .model-picker-panel label {
+    @apply grid gap-2 text-xs;
+  }
+  .model-picker-panel select {
+    @apply min-w-0 w-full rounded-md border border-stone-300 bg-stone-50 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-teal-600 disabled:opacity-60 dark:border-stone-600 dark:bg-stone-950;
   }
   .composer-hint {
     @apply mt-3 text-center text-[10px] leading-5 text-stone-400;
@@ -202,18 +353,30 @@
     border-right: 0;
     border-bottom: 1px solid var(--color-stone-200);
     max-height: 50dvh;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
   }
   .brand,
   .sidebar-caption {
     display: none;
   }
   .sidebar-footer {
-    position: absolute;
-    top: 10px;
-    right: 16px;
+    position: static;
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
     margin: 0;
     padding: 0;
     border: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .settings-link {
+    margin: 0;
+    gap: 4px;
+    padding: 8px;
   }
   .sidebar-footer > p,
   .sidebar-footer label {
@@ -221,27 +384,36 @@
   }
   .sidebar > button {
     width: auto;
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+  }
+  .sidebar-footer select {
+    max-width: 100px;
+    padding: 8px;
   }
   .conversation-list {
     display: flex;
     gap: 4px;
-    margin-top: 10px;
+    grid-column: 1 / -1;
+    grid-row: 2;
     overflow-x: auto;
   }
   .conversation-item {
     max-width: 200px;
     flex-shrink: 0;
   }
-  .chat-panel {
+  .chat-panel,
+  .settings-page {
     flex: 1;
     min-height: 0;
     height: auto;
   }
-  .chatgpt-toggle {
-    display: block;
+  .settings-content {
+    padding: 24px 20px;
   }
-  .chatgpt-controls:not(.is-open) {
-    display: none;
+  .settings-header {
+    padding: 16px 20px;
   }
   .chat-header {
     min-height: 64px;

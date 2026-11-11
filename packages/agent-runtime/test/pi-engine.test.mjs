@@ -17,8 +17,8 @@ async function fixture(t, responses) {
   const createRuntime = ModelRuntime.create
   t.mock.method(ModelRuntime, 'create', async function (options) {
     const runtime = await createRuntime.call(this, options)
-    runtime.registerNativeProvider(provider.provider)
-    await runtime.refresh({ allowNetwork: false })
+    const register = runtime.registerNativeProvider.bind(runtime)
+    t.mock.method(runtime, 'registerNativeProvider', () => register(provider.provider))
     return runtime
   })
   t.mock.method(globalThis, 'fetch', () => assert.fail('Pi adapter tests must remain offline'))
@@ -47,10 +47,33 @@ async function fixture(t, responses) {
     await rm(dataDir, { recursive: true, force: true })
   })
   async function create() {
-    const engine = await createPiEngine({ dataDir, provider: 'faux', model: 'faux-1' })
+    const model = provider.provider.getModels()[0]
+    const target = {
+      instanceId: 'faux',
+      revision: 1,
+      kind: 'endpoint',
+      provider: 'faux',
+      protocol: 'openai-chat',
+      baseUrl: model.baseUrl,
+      authentication: 'none',
+      model: {
+        id: model.id,
+        name: model.name,
+        contextWindow: model.contextWindow,
+        maxOutputTokens: model.maxTokens,
+      },
+      compatibility: {},
+    }
+    const engine = await createPiEngine({
+      dataDir,
+      credentials: {
+        credentials: () => Promise.resolve({ headers: {} }),
+        failed: () => Promise.resolve(),
+      },
+    })
     engines.push(engine)
-    assert.equal((await engine.meta()).configured, true)
-    return engine
+    assert.equal((await engine.meta()).configured, false)
+    return { ...engine, run: (input) => engine.run({ ...input, target }) }
   }
   function assertReleased() {
     assert.ok(sessions.size > 0, 'a real SDK session must have been used')

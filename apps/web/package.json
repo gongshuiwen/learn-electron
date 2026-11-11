@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit -p ../../tsconfig.web.json",
     "build": "npm run build:web --prefix ../..",
     "pretest": "npm run build",
-    "test": "node --import tsx --test test/*.test.mjs"
+    "test": "node --import tsx --test --test-concurrency=2 test/*.test.mjs"
   },
   "dependencies": {
     "@learn-electron/contracts": "*",

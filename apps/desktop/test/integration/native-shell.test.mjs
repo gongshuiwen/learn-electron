@@ -35,15 +35,22 @@ test(
       'https://chatgpt.com/settings/usage',
     ])
     assert.equal(page.url().startsWith('app://desktop/'), true)
-    const result = await page.evaluate(async () => {
-      const response = await fetch(`${window.electronAPI.apiBaseUrl}/api/v1/model`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modelId: 'model' }),
-      })
-      return { status: response.status, code: (await response.json()).error.code }
-    })
-    assert.deepEqual(result, { status: 409, code: 'auth_mode_disabled' })
+    const results = await page.evaluate(() =>
+      Promise.all(
+        ['/model', '/conversations/empty-conversation/model'].map(async (path) => {
+          const response = await fetch(`${window.electronAPI.apiBaseUrl}/api/v1${path}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instanceId: 'instance', modelId: 'model' }),
+          })
+          return { status: response.status, code: (await response.json()).error.code }
+        }),
+      ),
+    )
+    assert.deepEqual(results, [
+      { status: 409, code: 'engine_disabled' },
+      { status: 409, code: 'engine_disabled' },
+    ])
   },
 )
 

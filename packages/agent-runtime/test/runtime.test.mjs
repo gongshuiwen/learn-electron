@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { createMockEngine, createPiEngine } from '../src/index.ts'
 
-test('Pi metadata uses explicit server configuration without model network requests', async () => {
+test('Pi metadata uses application connections and ignores legacy environment credentials', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'learn-electron-runtime-'))
   const originalFetch = globalThis.fetch
   const originalKey = process.env.OPENAI_API_KEY
@@ -17,20 +17,38 @@ test('Pi metadata uses explicit server configuration without model network reque
     throw new Error('Runtime configuration must not fetch a remote model or invoke a provider')
   }
   process.env.OPENAI_API_KEY = 'runtime-test-not-a-real-key'
-  delete process.env.PI_MODEL
+  process.env.PI_MODEL = '__legacy_model__'
   const engines = []
   try {
-    const configured = await createPiEngine({ dataDir, provider: 'openai' })
+    const target = {
+      instanceId: 'configured-connection',
+      revision: 1,
+      kind: 'endpoint',
+      provider: 'Custom',
+      protocol: 'openai-chat',
+      baseUrl: 'https://example.invalid/v1',
+      authentication: 'api-key',
+      model: { id: 'manual-model', name: 'Manual', contextWindow: 32768, maxOutputTokens: 4096 },
+      compatibility: {},
+    }
+    const configured = await createPiEngine({
+      dataDir,
+      credentials: {
+        credentials: () => Promise.resolve({ apiKey: 'explicit-key', headers: {} }),
+        failed: () => Promise.resolve(),
+      },
+    })
     engines.push(configured)
     const meta = await configured.meta()
     assert.equal('apiVersion' in meta, false)
     assert.equal(meta.engine, 'pi')
-    assert.equal(meta.configured, true)
-    assert.equal(meta.model.provider, 'openai')
+    assert.equal(meta.configured, false)
+    assert.equal(meta.model.provider, 'unconfigured')
     assert.ok(meta.model.id)
     assert.equal(meta.capabilities.tools, false)
     await assert.rejects(
       configured.run({
+        target,
         conversationId: 'missing-native-session',
         message: 'Continue',
         history: [{ role: 'user', content: 'Old projected message' }],
@@ -57,33 +75,19 @@ test('Pi metadata uses explicit server configuration without model network reque
       'retain this conversation',
     )
 
-    delete process.env.OPENAI_API_KEY
-    const noKey = await createPiEngine({ dataDir, provider: 'openai' })
+    const noKey = await createPiEngine({ dataDir })
     engines.push(noKey)
     assert.equal((await noKey.meta()).configured, false)
 
-    const missing = await createPiEngine({
-      dataDir,
-      provider: '__missing_provider__',
-      model: '__missing_model__',
-    })
-    engines.push(missing)
-    const missingMeta = await missing.meta()
-    assert.equal(missingMeta.engine, 'pi')
-    assert.equal(missingMeta.configured, false)
-    assert.deepEqual(missingMeta.model, {
-      provider: '__missing_provider__',
-      id: '__missing_model__',
-    })
     await assert.rejects(
-      missing.run({
+      noKey.run({
         conversationId: 'configuration-test',
         message: 'Do not send',
         history: [],
         signal: new globalThis.AbortController().signal,
         onDelta: () => assert.fail('An unconfigured Pi cannot produce output'),
       }),
-      /未配置可用模型/,
+      /模型凭据不可用/,
     )
     assert.equal(requests.length, 0)
     assert.deepEqual((await readdir(dataDir)).sort(), ['sessions', 'workspace'])

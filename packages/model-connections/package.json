@@ -1,0 +1,10 @@
+{
+  "name": "@learn-electron/model-connections",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

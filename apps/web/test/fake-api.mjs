@@ -61,12 +61,22 @@ export function fakeApi() {
       const method = request.method()
       const json = (body, status = 200) =>
         route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+      if (path === '/model-adapters')
+        return json([
+          {
+            id: 'openai-chat',
+            name: 'OpenAI Chat Completions',
+            authentication: ['api-key', 'none'],
+          },
+        ])
       if (path === '/meta')
         return json({
           apiVersion,
           engine: 'mock',
           model: { provider: 'test', id: 'fixture-model' },
           configured,
+          selection: null,
+          target: null,
           capabilities: { tools: false },
         })
       if (path === '/conversations' && method === 'GET')

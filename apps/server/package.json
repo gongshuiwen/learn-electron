@@ -9,9 +9,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "npm run build:server --prefix ../..",
     "pretest": "npm run typecheck",
-    "test": "node --import tsx --test test/*.test.mjs"
+    "test": "node --import tsx --test --test-concurrency=2 test/*.test.mjs"
   },
   "dependencies": {
+    "@learn-electron/model-connections": "*",
     "@learn-electron/agent-runtime": "*",
     "@learn-electron/contracts": "*",
     "jose": "6.2.16",

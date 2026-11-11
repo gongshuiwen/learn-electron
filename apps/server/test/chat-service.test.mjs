@@ -66,6 +66,89 @@ async function fixture(t) {
   return { service, store, engine, calls, databasePath, engineCloseCalls: () => closeCalls }
 }
 
+test('a concurrent first run cannot bind a superseded model selection', async (t) => {
+  const store = new Store(':memory:')
+  const first = { instanceId: 'first', modelId: 'model-a' }
+  const second = { instanceId: 'second', modelId: 'model-b' }
+  const calls = []
+  const engine = {
+    run: async ({ target }) => {
+      calls.push(target.instanceId)
+      return { text: 'done' }
+    },
+    close: async () => {},
+  }
+  const models = {
+    defaultSelection: () => first,
+    statusFor: (selection, binding) => ({
+      selection,
+      target: binding ?? selection,
+      model: { provider: (binding ?? selection).instanceId, id: (binding ?? selection).modelId },
+      configured: true,
+    }),
+    resolve: (ref) => ({
+      ...ref,
+      kind: 'endpoint',
+      revision: 1,
+      provider: ref.instanceId,
+      protocol: 'openai-chat',
+      baseUrl: 'http://127.0.0.1:1',
+      authentication: 'none',
+      compatibility: {},
+      model: { id: ref.modelId, name: ref.modelId, contextWindow: 32768, maxOutputTokens: 4096 },
+    }),
+  }
+  const service = new ChatService(store, engine, models)
+  t.after(async () => {
+    await service.close()
+    store.close()
+  })
+  const conversation = service.createConversation(first)
+  const rejected = assert.rejects(
+    service.startRun(conversation.id, {
+      message: 'first',
+      requestId: 'race-request-1',
+      expectedTarget: first,
+    }),
+    { code: 'connection_changed' },
+  )
+  const previousSnapshot = service.getConversation(conversation.id)
+  const chosen = service.selectConversationModel(conversation.id, second)
+  const snapshot = await previousSnapshot
+  assert.deepEqual(snapshot.conversation.selection, first)
+  assert.deepEqual(snapshot.model.target, first)
+  await rejected
+  await chosen
+  assert.deepEqual(store.snapshot(conversation.id).conversation.selection, second)
+  assert.equal(store.snapshot(conversation.id).conversation.binding, undefined)
+  assert.equal(store.snapshot(conversation.id).messages.length, 0)
+  assert.deepEqual(calls, [])
+  for (const expectedTarget of [first, undefined]) {
+    await assert.rejects(
+      service.startRun(conversation.id, {
+        message: 'stale client',
+        requestId: 'race-request-stale',
+        expectedTarget,
+      }),
+      { code: 'connection_changed' },
+    )
+  }
+  const run = await service.startRun(conversation.id, {
+    message: 'second',
+    requestId: 'race-request-2',
+    expectedTarget: second,
+  })
+  assert.deepEqual(run.target, second)
+  assert.deepEqual(calls, ['second'])
+  const replay = await service.startRun(conversation.id, {
+    message: 'second',
+    requestId: 'race-request-2',
+    expectedTarget: first,
+  })
+  assert.equal(replay.id, run.id)
+  assert.deepEqual(calls, ['second'])
+})
+
 test('chat runs without HTTP and isolates detached or failing observers', async (t) => {
   const { service, calls } = await fixture(t)
   const conversation = service.createConversation()
@@ -76,19 +159,19 @@ test('chat runs without HTTP and isolates detached or failing observers', async 
   const received = []
   const ended = deferred()
   let detachedClosed = false
-  const first = service.subscribe(run.id, {
+  const first = await service.subscribe(run.id, {
     event: (event) => detached.push(event),
     close: () => {
       detachedClosed = true
     },
   })
-  service.subscribe(run.id, {
+  await service.subscribe(run.id, {
     event: () => {
       throw new Error('observer failed')
     },
     close: (error) => observerErrors.push(error),
   })
-  const second = service.subscribe(run.id, {
+  const second = await service.subscribe(run.id, {
     event: (event) => received.push(event),
     close: ended.resolve,
   })
@@ -109,7 +192,7 @@ test('chat runs without HTTP and isolates detached or failing observers', async 
     ['message.delta', 'message.completed', 'run.updated'],
   )
   assert.equal(received.at(-1).sequence, received.at(-2).sequence + 1)
-  const snapshot = service.getConversation(conversation.id)
+  const snapshot = await service.getConversation(conversation.id)
   assert.equal(snapshot.messages[1].content, 'final response')
   assert.equal(snapshot.run.status, 'completed')
   assert.equal((await service.startRun(conversation.id, request)).id, run.id)
@@ -125,10 +208,10 @@ test('chat cancellation preserves partial text and closing drains work and delet
     requestId: 'service-request-2',
   })
   const ended = deferred()
-  service.subscribe(run.id, { event: () => {}, close: ended.resolve })
+  await service.subscribe(run.id, { event: () => {}, close: ended.resolve })
   assert.equal(service.cancelRun(run.id).status, 'cancelling')
   assert.equal(await ended.promise, undefined)
-  const cancelled = service.getConversation(conversation.id)
+  const cancelled = await service.getConversation(conversation.id)
   assert.equal(cancelled.run.status, 'cancelled')
   assert.equal(cancelled.messages[1].content, 'partial')
   assert.equal(cancelled.messages[1].status, 'interrupted')
@@ -165,6 +248,32 @@ test('chat cancellation preserves partial text and closing drains work and delet
   )
 })
 
+test('a run finishing during asynchronous snapshot preparation cannot leave an active SSE subscription', async (t) => {
+  const { service, calls, engine } = await fixture(t)
+  const conversation = service.createConversation()
+  const run = await service.startRun(conversation.id, {
+    message: 'finish while subscribing',
+    requestId: 'subscribe-preparation',
+  })
+  const meta = await engine.meta()
+  const preparing = Promise.withResolvers()
+  engine.meta = () => preparing.promise
+  const subscription = service.subscribe(run.id, {
+    event() {
+      assert.fail('finished run must use the snapshot')
+    },
+    close() {},
+  })
+  calls[0].finish('completed before subscription')
+  await setImmediate()
+  preparing.resolve(meta)
+  const result = await subscription
+  assert.equal(result.active, false)
+  assert.equal(result.snapshot.snapshot.run.status, 'completed')
+  assert.equal(result.snapshot.snapshot.messages[1].content, 'completed before subscription')
+  result.unsubscribe()
+})
+
 test('terminal write retries stay within their conversation and never rerun the model', async (t) => {
   const { service, store, calls, databasePath } = await fixture(t)
   const conversation = service.createConversation()
@@ -176,7 +285,7 @@ test('terminal write retries stay within their conversation and never rerun the 
     requestId: 'outage-cancellation',
   })
   const ended = deferred()
-  service.subscribe(run.id, { event() {}, close: ended.resolve })
+  await service.subscribe(run.id, { event() {}, close: ended.resolve })
   const control = new DatabaseSync(databasePath)
   try {
     control.exec(`CREATE TRIGGER reject_finalize BEFORE UPDATE OF sequence ON conversations
@@ -186,9 +295,9 @@ test('terminal write retries stay within their conversation and never rerun the 
     assert.equal(store.getRun(run.id).status, 'running')
     assert.equal((await service.meta()).configured, true)
     assert.equal(service.listConversations().length, 2)
-    assert.equal(service.getConversation(other.id).run.id, otherRun.id)
+    assert.equal((await service.getConversation(other.id)).run.id, otherRun.id)
     assert.equal(service.getRun(otherRun.id).status, 'running')
-    assert.throws(() => service.getConversation(conversation.id), { code: 'storage_unavailable' })
+    await assert.rejects(service.getConversation(conversation.id), { code: 'storage_unavailable' })
     assert.throws(() => service.cancelRun(run.id), { code: 'storage_unavailable' })
     await assert.rejects(service.startRun(conversation.id, request), {
       code: 'storage_unavailable',
@@ -200,7 +309,10 @@ test('terminal write retries stay within their conversation and never rerun the 
     control.exec('DROP TRIGGER reject_finalize')
     assert.equal(service.cancelRun(run.id).status, 'completed')
     assert.equal(service.getRun(otherRun.id).status, 'cancelled')
-    assert.equal(service.getConversation(conversation.id).messages[1].content, 'complete response')
+    assert.equal(
+      (await service.getConversation(conversation.id)).messages[1].content,
+      'complete response',
+    )
     assert.equal((await service.startRun(conversation.id, request)).id, run.id)
     assert.equal(calls.length, 2)
 

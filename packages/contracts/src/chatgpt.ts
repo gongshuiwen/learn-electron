@@ -1,16 +1,10 @@
+import { isObject, parseIdentifier } from '@learn-electron/model-connections'
+
 export interface ChatGPTProfile {
   id: string
-  label: string
-  status: 'signed_out' | 'connected' | 'reauth_required'
+  name: string
+  status: 'signed_out' | 'connected' | 'reauth_required' | 'authorizing' | 'busy'
   planUsage: boolean
-  modelId: string | null
-}
-
-export interface ChatGPTState {
-  enabled: boolean
-  activeId: string | null
-  profiles: ChatGPTProfile[]
-  pendingLogin?: ChatGPTLogin
 }
 
 export interface ChatGPTModel {
@@ -18,76 +12,42 @@ export interface ChatGPTModel {
   name: string
 }
 
-export interface ChatGPTLogin {
+interface LoginDetails {
   id: string
-  status: 'pending' | 'completed' | 'cancelled' | 'expired' | 'failed'
   authorizationUrl: string
   expiresAt: string
   error?: string
 }
 
-function object(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function parseProfileId(value: unknown): string {
-  if (
-    !object(value) ||
-    typeof value.profileId !== 'string' ||
-    !/^[\w-]{1,128}$/.test(value.profileId)
+export type ChatGPTLogin = LoginDetails &
+  (
+    | { status: 'completed'; instanceId: string }
+    | { status: 'pending' | 'cancelled' | 'expired' | 'failed' }
   )
-    throw new Error('连接标识无效')
-  return value.profileId
-}
 
-export function parseLoginRequest(value: unknown): { profileId?: string } {
-  if (!object(value)) throw new Error('请求必须是 JSON 对象')
-  return value.profileId === undefined ? {} : { profileId: parseProfileId(value) }
-}
-
-export function parseModelSelection(value: unknown): string {
+export function parseChatGPTProfile(value: unknown): ChatGPTProfile {
   if (
-    !object(value) ||
-    typeof value.modelId !== 'string' ||
-    !value.modelId ||
-    value.modelId.length > 200
+    !isObject(value) ||
+    typeof value.name !== 'string' ||
+    !value.name.trim() ||
+    typeof value.status !== 'string' ||
+    !['signed_out', 'connected', 'reauth_required', 'authorizing', 'busy'].includes(value.status) ||
+    typeof value.planUsage !== 'boolean'
   )
-    throw new Error('模型标识无效')
-  return value.modelId
-}
-
-export function parseChatGPTState(value: unknown): ChatGPTState {
-  if (
-    !object(value) ||
-    typeof value.enabled !== 'boolean' ||
-    (value.activeId !== null && typeof value.activeId !== 'string') ||
-    !Array.isArray(value.profiles) ||
-    !value.profiles.every(
-      (profile) =>
-        object(profile) &&
-        typeof profile.id === 'string' &&
-        typeof profile.label === 'string' &&
-        typeof profile.status === 'string' &&
-        ['signed_out', 'connected', 'reauth_required'].includes(String(profile.status)) &&
-        typeof profile.planUsage === 'boolean' &&
-        (profile.modelId === null || typeof profile.modelId === 'string'),
-    )
-  ) {
     throw new Error('ChatGPT 连接状态格式无效')
+  return {
+    id: parseIdentifier(value.id),
+    name: value.name,
+    status: value.status as ChatGPTProfile['status'],
+    planUsage: value.planUsage,
   }
-  if (
-    value.pendingLogin !== undefined &&
-    parseChatGPTLogin(value.pendingLogin).status !== 'pending'
-  )
-    throw new Error('ChatGPT 登录进度格式无效')
-  return value as unknown as ChatGPTState
 }
 
 export function parseChatGPTModels(value: unknown): ChatGPTModel[] {
   if (
     !Array.isArray(value) ||
     !value.every(
-      (model) => object(model) && typeof model.id === 'string' && typeof model.name === 'string',
+      (model) => isObject(model) && typeof model.id === 'string' && typeof model.name === 'string',
     )
   )
     throw new Error('模型目录格式无效')
@@ -96,7 +56,7 @@ export function parseChatGPTModels(value: unknown): ChatGPTModel[] {
 
 export function parseChatGPTLogin(value: unknown): ChatGPTLogin {
   if (
-    !object(value) ||
+    !isObject(value) ||
     typeof value.id !== 'string' ||
     typeof value.status !== 'string' ||
     !['pending', 'completed', 'cancelled', 'expired', 'failed'].includes(String(value.status)) ||
@@ -105,10 +65,18 @@ export function parseChatGPTLogin(value: unknown): ChatGPTLogin {
     (value.error !== undefined && typeof value.error !== 'string')
   )
     throw new Error('登录进度格式无效')
-  return value as unknown as ChatGPTLogin
+  const details: LoginDetails = {
+    id: parseIdentifier(value.id),
+    authorizationUrl: value.authorizationUrl,
+    expiresAt: value.expiresAt,
+    ...(value.error !== undefined ? { error: value.error } : {}),
+  }
+  return value.status === 'completed'
+    ? { ...details, status: 'completed', instanceId: parseIdentifier(value.instanceId) }
+    : { ...details, status: value.status as 'pending' | 'cancelled' | 'expired' | 'failed' }
 }
 
 export function parseLogoutResult(value: unknown): { revoked: boolean } {
-  if (!object(value) || typeof value.revoked !== 'boolean') throw new Error('退出结果格式无效')
+  if (!isObject(value) || typeof value.revoked !== 'boolean') throw new Error('退出结果格式无效')
   return { revoked: value.revoked }
 }

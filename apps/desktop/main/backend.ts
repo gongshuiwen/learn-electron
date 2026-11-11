@@ -172,7 +172,7 @@ async function stopChild(child: ChildProcess, force = false): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return
   await new Promise<void>((resolve) => {
     // A rotating OAuth refresh must finish its bounded request and persist before exit.
-    const grace = process.env.PI_AUTH_MODE === 'chatgpt' ? 30_000 : 8_000
+    const grace = 30_000
     const timer = setTimeout(() => child.kill('SIGKILL'), grace)
     timer.unref()
     child.once('exit', () => {

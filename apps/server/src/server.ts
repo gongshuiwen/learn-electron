@@ -15,12 +15,16 @@ import {
   ModelError,
   type AgentEngine,
 } from '@learn-electron/agent-runtime'
-import {
-  parseLoginRequest,
-  parseModelSelection,
-  parseProfileId,
-} from '@learn-electron/contracts/chatgpt'
 import { ChatGPTConnectionService } from './chatgpt/connection-service.ts'
+import { ModelService } from './model-service.ts'
+import {
+  parseSaveProvider,
+  parseModelRef,
+  parseProviderTest,
+  parseCreateConversation,
+  modelAdapters,
+} from '@learn-electron/contracts/models'
+import { isObject } from '@learn-electron/model-connections'
 import type { ChatGPTOAuth } from './chatgpt/oauth.ts'
 import { ChatService } from './chat-service.ts'
 import { ChatError, HttpError, type ChatErrorCode } from './errors.ts'
@@ -35,7 +39,6 @@ export interface ServerOptions {
   dataDir: string
   engine?: AgentEngine
   allowedOrigins?: string[]
-  authMode?: 'env' | 'chatgpt'
   chatgptOAuth?: ChatGPTOAuth
 }
 
@@ -112,27 +115,29 @@ export async function startServer(
   const directory = resolve(options.dataDir)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const releaseOwnership = await acquireDataDirectory(directory)
-  let connections: ChatGPTConnectionService | undefined
-  let isChatBusy = () => false
+  let chatgpt: ChatGPTConnectionService | undefined
+  let models: ModelService | undefined
+  let isChatBusy = (_instanceId?: string) => false
   let engine: AgentEngine
   try {
-    const authMode = options.authMode ?? process.env.PI_AUTH_MODE ?? 'env'
-    if (authMode !== 'env' && authMode !== 'chatgpt')
-      throw new Error('PI_AUTH_MODE 仅支持 env 或 chatgpt')
-    if (authMode === 'chatgpt' && !options.engine) {
-      connections = await ChatGPTConnectionService.create({
+    if (!options.engine) {
+      chatgpt = await ChatGPTConnectionService.create({
         dataDir: directory,
         models: await getOpenAIModels(),
-        isBusy: () => isChatBusy(),
+        isBusy: (id) => isChatBusy(id),
+        isUpdating: (id) => models?.isChanging(id) ?? false,
         oauth: options.chatgptOAuth,
-        model: process.env.PI_MODEL || undefined,
       })
+      models = await ModelService.create(directory, chatgpt, (id) => isChatBusy(id))
     }
     engine =
       options.engine ??
-      (await createPiEngine({ dataDir: join(directory, 'pi'), subscription: connections }))
+      (await createPiEngine({
+        dataDir: join(directory, 'pi'),
+        ...(models ? { credentials: models } : {}),
+      }))
   } catch (error) {
-    await connections?.close()
+    await (models ?? chatgpt)?.close()
     await releaseOwnership()
     throw error
   }
@@ -142,14 +147,14 @@ export async function startServer(
   } catch (error) {
     try {
       await waitWithin(engine.close(), 3000)
-      await connections?.close()
+      await (models ?? chatgpt)?.close()
     } finally {
       await releaseOwnership()
     }
     throw error
   }
-  const chat = new ChatService(store, engine)
-  isChatBusy = () => chat.isBusy()
+  const chat = new ChatService(store, engine, models)
+  isChatBusy = (id) => chat.isBusy(id)
   const origins = new Set(options.allowedOrigins ?? [])
   let expectedHost = ''
   let url = ''
@@ -193,42 +198,84 @@ export async function startServer(
     const requestUrl = new URL(request.url ?? '/', url)
     const pathname = requestUrl.pathname
     const method = request.method
-    if (pathname === `${API_PREFIX}/auth/chatgpt` && method === 'GET') {
-      json(response, 200, connections?.status() ?? { enabled: false, activeId: null, profiles: [] })
+    if (pathname === `${API_PREFIX}/model-adapters` && method === 'GET') {
+      json(response, 200, modelAdapters)
       return
     }
-    if (
-      pathname.startsWith(`${API_PREFIX}/auth/chatgpt/`) ||
-      pathname === `${API_PREFIX}/models` ||
-      pathname === `${API_PREFIX}/model`
-    ) {
-      if (!connections)
-        throw new HttpError(409, 'auth_mode_disabled', '当前使用服务端 API Key 模式')
-      const loginRoute = /^\/api\/v1\/auth\/chatgpt\/logins\/([\w-]+)$/.exec(pathname)
-      if (pathname === `${API_PREFIX}/auth/chatgpt/login` && method === 'POST') {
-        const body = parse(parseLoginRequest, await readJson(request))
-        json(response, 201, await connections.beginLogin(body.profileId))
-      } else if (loginRoute?.[1] && method === 'GET')
-        json(response, 200, connections.login(loginRoute[1]))
-      else if (loginRoute?.[1] && method === 'DELETE') {
-        connections.cancelLogin(loginRoute[1])
-        response.writeHead(204)
-        response.end()
-      } else if (pathname === `${API_PREFIX}/auth/chatgpt/select` && method === 'POST') {
-        await connections.select(parse(parseProfileId, await readJson(request)))
-        json(response, 200, connections.status())
-      } else if (pathname === `${API_PREFIX}/auth/chatgpt/logout` && method === 'POST') {
-        json(response, 200, await connections.logout(() => chat.cancelAll()))
-      } else if (pathname === `${API_PREFIX}/models` && method === 'GET') {
+    const providerRoute =
+      /^\/api\/v1\/model-providers\/([\w-]+)(?:\/(models|models\/refresh|test|auth\/attempts|auth\/logout))?$/.exec(
+        pathname,
+      )
+    if (pathname === `${API_PREFIX}/model-providers` || providerRoute) {
+      if (!models) {
+        if (pathname === `${API_PREFIX}/model-providers` && method === 'GET') {
+          json(response, 200, {
+            defaultSelection: null,
+            instances: [],
+            chatgpt: { enabled: false },
+          })
+          return
+        }
+        throw new HttpError(409, 'engine_disabled', '演示模式不支持模型供应商配置')
+      }
+      const id = providerRoute?.[1]
+      const action = providerRoute?.[2]
+      if (!id && method === 'GET') json(response, 200, models.status())
+      else if (!id && method === 'POST') {
+        const body = await readJson(request)
+        json(
+          response,
+          201,
+          isObject(body) && body.kind === 'chatgpt'
+            ? await models.createChatGPT()
+            : await models.save(parse(parseSaveProvider, body)),
+        )
+      } else if (id && !action && method === 'PATCH')
         json(
           response,
           200,
-          await connections.models(requestUrl.searchParams.get('refresh') === '1'),
+          await models.save(parse(parseSaveProvider, await readJson(request)), id),
         )
-      } else if (pathname === `${API_PREFIX}/model` && method === 'PUT') {
-        await connections.selectModel(parse(parseModelSelection, await readJson(request)))
-        json(response, 200, await chat.meta())
+      else if (id && !action && method === 'DELETE') json(response, 200, await models.remove(id))
+      else if (id && action === 'models' && method === 'GET')
+        json(response, 200, await models.models(id))
+      else if (id && action === 'models/refresh' && method === 'POST')
+        json(response, 200, await models.refreshModels(id))
+      else if (id && action === 'test' && method === 'POST') {
+        const { modelId } = parse(parseProviderTest, await readJson(request))
+        if (!engine.testConnection)
+          throw new HttpError(409, 'engine_disabled', '当前引擎不支持连接测试')
+        await models.test(id, modelId, (target, signal) => engine.testConnection!(target, signal))
+        response.writeHead(204)
+        response.end()
+      } else if (id && action?.startsWith('auth/')) {
+        if (!chatgpt) throw new HttpError(409, 'engine_disabled', '当前引擎不支持授权')
+        const instance = models.status().instances.find((item) => item.id === id)
+        if (!instance) throw new HttpError(404, 'provider_not_found', '模型供应商实例不存在')
+        if (instance.kind !== 'chatgpt')
+          throw new HttpError(409, 'auth_unsupported', '该实例不支持网页登录')
+        if (action === 'auth/attempts' && method === 'POST')
+          json(response, 201, await chatgpt.beginLogin(id))
+        else if (action === 'auth/logout' && method === 'POST')
+          json(response, 200, await chatgpt.logout(id, () => chat.cancelAll(id)))
+        else throw new HttpError(405, 'method_not_allowed', '不支持的请求方法')
       } else throw new HttpError(405, 'method_not_allowed', '不支持的请求方法')
+      return
+    }
+    const attemptRoute = /^\/api\/v1\/model-auth-attempts\/([\w-]+)(\/cancel)?$/.exec(pathname)
+    if (attemptRoute?.[1]) {
+      if (!chatgpt) throw new HttpError(409, 'engine_disabled', '演示模式不支持登录')
+      if (!attemptRoute[2] && method === 'GET') json(response, 200, chatgpt.login(attemptRoute[1]))
+      else if (attemptRoute[2] && method === 'POST') {
+        chatgpt.cancelLogin(attemptRoute[1])
+        response.writeHead(204)
+        response.end()
+      } else throw new HttpError(405, 'method_not_allowed', '不支持的请求方法')
+      return
+    }
+    if (pathname === `${API_PREFIX}/model` && method === 'PUT') {
+      if (!models) throw new HttpError(409, 'engine_disabled', '当前引擎不支持模型选择')
+      json(response, 200, await models.select(parse(parseModelRef, await readJson(request))))
       return
     }
     if (pathname === `${API_PREFIX}/meta` && method === 'GET') {
@@ -237,18 +284,31 @@ export async function startServer(
     }
     if (pathname === `${API_PREFIX}/conversations`) {
       if (method === 'GET') json(response, 200, chat.listConversations())
-      else if (method === 'POST') json(response, 201, chat.createConversation())
-      else throw new HttpError(405, 'method_not_allowed', '不支持的请求方法')
+      else if (method === 'POST') {
+        const body = request.headers['content-type'] ? await readJson(request) : {}
+        json(response, 201, chat.createConversation(parse(parseCreateConversation, body).selection))
+      } else throw new HttpError(405, 'method_not_allowed', '不支持的请求方法')
       return
     }
-    const conversationRoute = /^\/api\/v1\/conversations\/([\w-]+)(\/runs)?$/.exec(pathname)
+    const conversationRoute = /^\/api\/v1\/conversations\/([\w-]+)(\/runs|\/model)?$/.exec(pathname)
     if (conversationRoute?.[1]) {
       const conversationId = conversationRoute[1]
-      if (conversationRoute[2]) {
+      if (conversationRoute[2] === '/model') {
+        if (method !== 'PUT') throw new HttpError(405, 'method_not_allowed', '不支持的请求方法')
+        if (!models) throw new HttpError(409, 'engine_disabled', '当前引擎不支持模型选择')
+        json(
+          response,
+          200,
+          await chat.selectConversationModel(
+            conversationId,
+            parse(parseModelRef, await readJson(request)),
+          ),
+        )
+      } else if (conversationRoute[2]) {
         if (method !== 'POST') throw new HttpError(405, 'method_not_allowed', '不支持的请求方法')
         const body = parse(parseStartRun, await readJson(request))
         json(response, 202, await chat.startRun(conversationId, body))
-      } else if (method === 'GET') json(response, 200, chat.getConversation(conversationId))
+      } else if (method === 'GET') json(response, 200, await chat.getConversation(conversationId))
       else if (method === 'PATCH')
         json(
           response,
@@ -269,13 +329,17 @@ export async function startServer(
         return
       }
       if (runRoute[2] === 'events' && method === 'GET') {
-        const subscription = chat.subscribe(runRoute[1], {
+        const subscription = await chat.subscribe(runRoute[1], {
           event: (event) => sendEvent(response, event),
           close: (error) => {
             if (error) response.destroy()
             else response.end()
           },
         })
+        if (response.destroyed) {
+          subscription.unsubscribe()
+          return
+        }
         response.once('close', subscription.unsubscribe)
         response.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
@@ -342,7 +406,7 @@ export async function startServer(
     try {
       store.close()
       await waitWithin(engine.close(), 3000)
-      await connections?.close()
+      await (models ?? chatgpt)?.close()
     } finally {
       await releaseOwnership()
     }
@@ -354,7 +418,7 @@ export async function startServer(
       closing = true
       try {
         // Stop callback admission immediately, then drain queued refresh persistence.
-        const results = await Promise.allSettled([connections?.close(), chat.close()])
+        const results = await Promise.allSettled([models?.close(), chat.close()])
         for (const result of results) if (result.status === 'rejected') throw result.reason
       } finally {
         await new Promise<void>((done) => {

@@ -1,7 +1,11 @@
+import { modelRef, type ModelTarget, type ModelRef } from '@learn-electron/model-connections'
+import type { ModelStatus } from '@learn-electron/contracts/models'
+import type { ModelService } from './model-service.ts'
 import {
   API_VERSION,
   isActiveRun,
   type Run,
+  type Conversation,
   type RunEvent,
   type ServiceMeta,
   type StartRunRequest,
@@ -15,6 +19,7 @@ import { waitWithin } from './wait-within.ts'
 interface ActiveRun {
   controller: AbortController
   promise: Promise<void>
+  instanceId?: string
 }
 
 interface RunObserver {
@@ -48,6 +53,7 @@ export class ChatService {
   constructor(
     private readonly store: Store,
     private readonly engine: AgentEngine,
+    private readonly models?: ModelService,
   ) {}
 
   private assertOpen(): void {
@@ -67,14 +73,35 @@ export class ChatService {
   async meta(): Promise<ServiceMeta> {
     this.assertOpen()
     const info = await this.engine.meta()
+    const status = this.models
+      ? this.models.statusFor(this.models.defaultSelection())
+      : { model: info.model, configured: info.configured, selection: null, target: null }
     return {
+      ...status,
       engine: info.engine,
-      model: info.model,
-      configured: info.configured,
       capabilities: info.capabilities,
       apiVersion: API_VERSION,
-      ...(info.authMode ? { authMode: info.authMode } : {}),
     }
+  }
+
+  private async conversationStatus(conversation: Conversation): Promise<ModelStatus> {
+    if (!this.models) {
+      const info = await this.engine.meta()
+      return { model: info.model, configured: info.configured, selection: null, target: null }
+    }
+    const selection = conversation.selection ?? this.models.defaultSelection()
+    if (!conversation.binding) return this.models.statusFor(selection)
+    const binding = conversation.binding
+    const unavailable = (reason: string): ModelStatus => ({
+      selection,
+      target: null,
+      model: { provider: 'unavailable', id: binding.modelId ?? 'unknown' },
+      configured: false,
+      reason,
+    })
+    if (binding.instanceId === 'env' || !binding.modelId) return unavailable('context_unavailable')
+    const target = { instanceId: binding.instanceId, modelId: binding.modelId }
+    return this.models.statusFor(conversation.selection ?? target, target)
   }
 
   listConversations() {
@@ -82,20 +109,31 @@ export class ChatService {
     return this.store.list()
   }
 
-  createConversation() {
+  createConversation(selection?: ModelRef) {
     this.assertOpen()
-    return this.store.create()
+    return this.store.create(selection ?? this.models?.defaultSelection() ?? null)
   }
 
-  getConversation(id: string) {
+  async getConversation(id: string) {
     this.assertOpen()
     this.retryFinalization(id)
-    return this.store.snapshot(id)
+    const snapshot = this.store.snapshot(id)
+    const model = await this.conversationStatus(snapshot.conversation)
+    return { ...snapshot, model }
   }
 
   renameConversation(id: string, title: string) {
     this.assertOpen()
     return this.store.rename(id, title)
+  }
+
+  selectConversationModel(id: string, selection: ModelRef) {
+    this.assertOpen()
+    if (!this.models) throw new ChatError('engine_not_configured', '当前引擎不支持模型选择')
+    if (this.deleting.has(id)) throw new ChatError('conversation_busy', '该会话正在删除')
+    this.models.resolve(selection)
+    this.store.selectModel(id, selection)
+    return this.getConversation(id)
   }
 
   async deleteConversation(id: string): Promise<void> {
@@ -120,18 +158,20 @@ export class ChatService {
     this.retryFinalization(id)
     const existing = this.store.findRequest(id, request)
     if (existing) return existing
-    const info = await this.engine.meta()
-    if (!info.configured)
-      throw new ChatError(
-        'engine_not_configured',
-        info.authMode === 'chatgpt'
-          ? '请先连接 ChatGPT、授权使用计划并选择可用模型'
-          : '请先在服务端配置模型与 API 密钥',
-      )
+    const status = await this.conversationStatus(this.store.getConversation(id))
+    if (!status.configured) {
+      if (status.reason === 'context_unavailable')
+        throw new ChatError(
+          'connection_changed',
+          '此会话没有可用的模型绑定，请新建会话；历史仍可查看',
+        )
+      throw new ChatError('engine_not_configured', '会话模型不可用，请检查实例凭据和模型配置')
+    }
+    const target = this.models && status.target ? this.models.resolve(status.target) : undefined
     this.assertOpen()
     this.retryFinalization(id)
     if (this.deleting.has(id)) throw new ChatError('conversation_busy', '该会话正在删除')
-    const started = this.store.start(id, request, info.connectionId)
+    const started = this.store.start(id, request, target ? modelRef(target) : undefined)
     if (started.created) {
       const controller = new AbortController()
       const promise = this.execute(
@@ -140,7 +180,7 @@ export class ChatService {
         request.message,
         started.history,
         controller,
-        info.connectionId,
+        target,
       )
         .catch(() => {
           if (this.closed) return
@@ -148,7 +188,11 @@ export class ChatService {
           this.closeSubscribers(started.run.id, new Error('任务结束状态保存失败'))
         })
         .finally(() => this.active.delete(started.run.id))
-      this.active.set(started.run.id, { controller, promise })
+      this.active.set(started.run.id, {
+        controller,
+        promise,
+        ...(target ? { instanceId: target.instanceId } : {}),
+      })
     }
     return started.run
   }
@@ -161,24 +205,24 @@ export class ChatService {
     return this.store.getRun(id)
   }
 
-  isBusy(): boolean {
-    return this.active.size > 0 || this.deleting.size > 0
+  isBusy(instanceId?: string): boolean {
+    return instanceId
+      ? [...this.active.values()].some((task) => task.instanceId === instanceId)
+      : this.active.size > 0 || this.deleting.size > 0
   }
 
-  async cancelAll(): Promise<void> {
-    for (const [id, task] of this.active) {
+  async cancelAll(instanceId?: string): Promise<void> {
+    const tasks = [...this.active].filter(
+      ([, task]) => !instanceId || task.instanceId === instanceId,
+    )
+    for (const [id, task] of tasks) {
       try {
         this.cancelRun(id)
       } finally {
         task.controller.abort()
       }
     }
-    if (
-      !(await waitWithin(
-        Promise.allSettled([...this.active.values()].map((task) => task.promise)),
-        3000,
-      ))
-    )
+    if (!(await waitWithin(Promise.allSettled(tasks.map(([, task]) => task.promise)), 3000)))
       throw new ChatError('conversation_busy', '任务仍在停止中，请稍后再退出登录')
   }
 
@@ -204,9 +248,12 @@ export class ChatService {
     }
   }
 
-  subscribe(id: string, observer: RunObserver) {
+  async subscribe(id: string, observer: RunObserver) {
+    const initial = this.getRun(id)
+    const info = await this.getConversation(initial.conversationId)
+    // No await between the final snapshot and subscription: terminal events cannot be missed.
     const run = this.getRun(id)
-    const snapshot = this.store.snapshot(run.conversationId)
+    const snapshot = { ...this.store.snapshot(run.conversationId), model: info.model }
     const active = isActiveRun(run)
     const clients = this.subscribers.get(id) ?? new Set<RunObserver>()
     if (active) {
@@ -293,7 +340,7 @@ export class ChatService {
     text: string,
     history: EngineRunInput['history'],
     controller: AbortController,
-    connectionId?: string,
+    target?: ModelTarget,
   ): Promise<void> {
     let receivedCharacters = 0
     let finalText: string | undefined
@@ -304,7 +351,7 @@ export class ChatService {
         conversationId: run.conversationId,
         message: text,
         history,
-        ...(connectionId ? { connectionId } : {}),
+        ...(target ? { target } : {}),
         signal: controller.signal,
         onDelta: (delta) => {
           if (this.closed || controller.signal.aborted) return
@@ -334,7 +381,7 @@ export class ChatService {
       status === 'completed' ? finalText : undefined,
       status,
       status === 'failed'
-        ? (failure?.message ?? '模型请求失败，请检查服务端配置或稍后重试')
+        ? (failure?.message ?? '模型请求失败，请检查模型连接或稍后重试')
         : status === 'interrupted'
           ? '服务已停止，任务没有自动重放'
           : undefined,

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ArrowUp,
   Check,
@@ -7,6 +7,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Settings2,
   Square,
   Trash2,
   X,
@@ -16,15 +17,33 @@ import { ThemeSelect } from '@/components/ThemeSelect'
 import { MessageList } from '@/features/chat/MessageList'
 import { useChat } from '@/features/chat/use-chat'
 import { platform } from '@/platform'
-import { ChatGPTConnection } from '@/features/chatgpt/ChatGPTConnection'
+import { ModelPicker } from '@/features/models/ModelPicker'
+import { SettingsPage } from '@/features/settings/SettingsPage'
+
+function isSettingsPage(): boolean {
+  return window.location.hash === '#/settings'
+}
 
 export default function App() {
   const chat = useChat()
+  const [settingsPage, setSettingsPage] = useState(isSettingsPage)
   const [draft, setDraft] = useState('')
   const [editingTitle, setEditingTitle] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const title = chat.snapshot?.conversation.title ?? '新的开始'
   const run = chat.snapshot?.run
+  const { refreshMeta } = chat
+
+  useEffect(() => {
+    const navigate = () => {
+      const settings = isSettingsPage()
+      setSettingsPage(settings)
+      // Recheck the selected model when returning to chat.
+      if (!settings) void refreshMeta().catch(() => {})
+    }
+    window.addEventListener('hashchange', navigate)
+    return () => window.removeEventListener('hashchange', navigate)
+  }, [refreshMeta])
 
   async function send(): Promise<void> {
     const message = draft.trim()
@@ -46,6 +65,7 @@ export default function App() {
           onClick={() => {
             setEditingTitle(null)
             setConfirmDelete(false)
+            window.location.hash = '/'
             void chat.createConversation()
           }}
           disabled={chat.pending || chat.loading}
@@ -66,6 +86,7 @@ export default function App() {
               onClick={() => {
                 setEditingTitle(null)
                 setConfirmDelete(false)
+                window.location.hash = '/'
                 chat.selectConversation(conversation.id)
               }}
               className={`conversation-item ${chat.selectedId === conversation.id ? 'selected' : ''}`}
@@ -82,14 +103,15 @@ export default function App() {
             </p>
           ) : null}
         </nav>
-        {chat.meta?.authMode === 'chatgpt' ? (
-          <ChatGPTConnection
-            onChanged={chat.refreshMeta}
-            activeRun={chat.active}
-            failureKey={run?.status === 'failed' ? run.id : undefined}
-          />
-        ) : null}
         <div className="sidebar-footer">
+          <a
+            href="#/settings"
+            className="settings-link"
+            aria-current={settingsPage ? 'page' : undefined}
+          >
+            <Settings2 className="size-4" aria-hidden="true" />
+            设置
+          </a>
           <ThemeSelect />
           <p>
             <Circle className="size-2 fill-current" aria-hidden="true" />
@@ -98,244 +120,269 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="chat-panel">
-        <header className="chat-header">
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold">{title}</h1>
-            <p className="mt-1 truncate text-xs text-stone-400">
-              {chat.meta ? `${chat.meta.model.provider} / ${chat.meta.model.id}` : '正在连接服务…'}
-            </p>
-          </div>
-          {chat.snapshot ? (
-            <div className="flex gap-1">
+      {settingsPage ? (
+        <SettingsPage
+          engine={chat.meta?.engine}
+          error={chat.error}
+          onRetry={chat.retry}
+          onChanged={chat.refreshMeta}
+          activeRun={chat.active}
+          activeInstanceId={chat.active ? run?.target?.instanceId : undefined}
+          failureKey={run?.status === 'failed' ? run.id : undefined}
+        />
+      ) : (
+        <main className="chat-panel">
+          <header className="chat-header">
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold">{title}</h1>
+              <p className="mt-1 truncate text-xs text-stone-400">
+                {chat.model
+                  ? `${chat.model.model.provider} / ${chat.model.model.id}`
+                  : '正在连接服务…'}
+              </p>
+            </div>
+            {chat.snapshot ? (
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="重命名对话"
+                  title="重命名对话"
+                  disabled={chat.pending}
+                  onClick={() => {
+                    setEditingTitle(title)
+                    setConfirmDelete(false)
+                  }}
+                >
+                  <Pencil className="size-4" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="删除对话"
+                  title="删除对话"
+                  disabled={chat.pending || chat.active}
+                  onClick={() => {
+                    setConfirmDelete(true)
+                    setEditingTitle(null)
+                  }}
+                >
+                  <Trash2 className="size-4" aria-hidden="true" />
+                </button>
+              </div>
+            ) : null}
+          </header>
+
+          {editingTitle !== null ? (
+            <form
+              className="action-bar"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void chat.rename(editingTitle).then((success) => {
+                  if (success) setEditingTitle(null)
+                })
+              }}
+            >
+              <label className="sr-only" htmlFor="conversation-title">
+                对话标题
+              </label>
+              <input
+                id="conversation-title"
+                autoFocus
+                maxLength={100}
+                value={editingTitle}
+                onChange={(event) => setEditingTitle(event.currentTarget.value)}
+                className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"
+              />
+              <Button type="submit" disabled={chat.pending || !editingTitle.trim()}>
+                <Check aria-hidden="true" />
+                保存
+              </Button>
               <button
                 type="button"
                 className="icon-button"
-                aria-label="重命名对话"
-                title="重命名对话"
-                disabled={chat.pending}
-                onClick={() => {
-                  setEditingTitle(title)
-                  setConfirmDelete(false)
-                }}
+                aria-label="取消重命名"
+                onClick={() => setEditingTitle(null)}
               >
-                <Pencil className="size-4" aria-hidden="true" />
+                <X className="size-4" />
               </button>
+            </form>
+          ) : null}
+          {confirmDelete ? (
+            <div className="action-bar" role="alert">
+              <p className="flex-1 text-sm">删除这段对话及其消息？</p>
+              <Button
+                variant="outline"
+                disabled={chat.pending}
+                onClick={() => setConfirmDelete(false)}
+              >
+                保留
+              </Button>
+              <Button
+                disabled={chat.pending}
+                onClick={() =>
+                  void chat.remove().then((success) => {
+                    if (success) setConfirmDelete(false)
+                  })
+                }
+              >
+                确认删除
+              </Button>
+            </div>
+          ) : null}
+          {chat.error ? (
+            <div className="notice notice-error" role="alert">
+              <span>{chat.error}</span>
               <button
                 type="button"
-                className="icon-button"
-                aria-label="删除对话"
-                title="删除对话"
-                disabled={chat.pending || chat.active}
-                onClick={() => {
-                  setConfirmDelete(true)
-                  setEditingTitle(null)
-                }}
+                onClick={chat.retry}
+                className="inline-flex items-center gap-1 font-medium"
               >
-                <Trash2 className="size-4" aria-hidden="true" />
+                <RefreshCw className="size-3" aria-hidden="true" />
+                重试
               </button>
             </div>
           ) : null}
-        </header>
-
-        {editingTitle !== null ? (
-          <form
-            className="action-bar"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void chat.rename(editingTitle).then((success) => {
-                if (success) setEditingTitle(null)
-              })
-            }}
-          >
-            <label className="sr-only" htmlFor="conversation-title">
-              对话标题
-            </label>
-            <input
-              id="conversation-title"
-              autoFocus
-              maxLength={100}
-              value={editingTitle}
-              onChange={(event) => setEditingTitle(event.currentTarget.value)}
-              className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"
-            />
-            <Button type="submit" disabled={chat.pending || !editingTitle.trim()}>
-              <Check aria-hidden="true" />
-              保存
-            </Button>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="取消重命名"
-              onClick={() => setEditingTitle(null)}
-            >
-              <X className="size-4" />
-            </button>
-          </form>
-        ) : null}
-        {confirmDelete ? (
-          <div className="action-bar" role="alert">
-            <p className="flex-1 text-sm">删除这段对话及其消息？</p>
-            <Button
-              variant="outline"
-              disabled={chat.pending}
-              onClick={() => setConfirmDelete(false)}
-            >
-              保留
-            </Button>
-            <Button
-              disabled={chat.pending}
-              onClick={() =>
-                void chat.remove().then((success) => {
-                  if (success) setConfirmDelete(false)
-                })
-              }
-            >
-              确认删除
-            </Button>
-          </div>
-        ) : null}
-        {chat.error ? (
-          <div className="notice notice-error" role="alert">
-            <span>{chat.error}</span>
-            <button
-              type="button"
-              onClick={chat.retry}
-              className="inline-flex items-center gap-1 font-medium"
-            >
-              <RefreshCw className="size-3" aria-hidden="true" />
-              重试
-            </button>
-          </div>
-        ) : null}
-        {chat.meta && !chat.meta.configured ? (
-          <div className="notice" role="status">
-            {chat.meta.authMode === 'chatgpt'
-              ? '请在侧栏连接 ChatGPT，授权使用计划并选择可用模型。'
-              : '尚未配置模型。请在服务端设置模型及 API Key 环境变量后重启服务；浏览器无需填写密钥。'}
-          </div>
-        ) : null}
-        {chat.active && chat.connection === 'reconnecting' ? (
-          <div className="notice" role="status">
-            <span>连接中断，正在自动重连。回复仍在服务端继续。</span>
-            <button type="button" onClick={chat.reconnect}>
-              立即重连
-            </button>
-          </div>
-        ) : null}
-        {run?.status === 'failed' ? (
-          <div className="notice notice-error" role="alert">
-            {run.error ?? '生成失败，请重试。'}
-          </div>
-        ) : null}
-        {run?.status === 'interrupted' ? (
-          <div className="notice" role="status">
-            上次回复因服务中断而结束，已保留收到的内容。你可以继续发送消息。
-          </div>
-        ) : null}
-
-        {chat.loading ? (
-          <div className="empty-state" role="status">
-            <span className="loading-dot" />
-            正在载入对话…
-          </div>
-        ) : chat.snapshot?.messages.length ? (
-          <MessageList messages={chat.snapshot.messages} />
-        ) : (
-          <div className="empty-state">
-            <div className="welcome-mark">π</div>
-            <p className="mb-2 text-xs uppercase tracking-[0.25em] text-teal-700 dark:text-teal-400">
-              A little room to think
-            </p>
-            <h2 className="text-3xl font-semibold tracking-tight">今天，想聊些什么？</h2>
-            <p className="mt-4 max-w-sm text-sm leading-7 text-stone-500 dark:text-stone-400">
-              整理一个想法，理解一个问题，
-              <br />
-              或从一句简单的问候开始。
-            </p>
-            <div className="mt-8 flex flex-wrap justify-center gap-2">
-              {['帮我梳理一个想法', '解释一个复杂概念', '一起制定学习计划'].map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  className="suggestion"
-                  onClick={() => setDraft(suggestion)}
-                >
-                  {suggestion}
-                </button>
-              ))}
+          {chat.model && !chat.model.configured ? (
+            <div className="notice" role="status">
+              <span>会话模型不可用。请检查设置中的实例、凭据与模型；已有会话保留原模型绑定。</span>
+              <a href="#/settings" className="font-medium underline">
+                打开设置
+              </a>
             </div>
-          </div>
-        )}
+          ) : null}
+          {chat.active && chat.connection === 'reconnecting' ? (
+            <div className="notice" role="status">
+              <span>连接中断，正在自动重连。回复仍在服务端继续。</span>
+              <button type="button" onClick={chat.reconnect}>
+                立即重连
+              </button>
+            </div>
+          ) : null}
+          {run?.status === 'failed' ? (
+            <div className="notice notice-error" role="alert">
+              {run.error ?? '生成失败，请重试。'}
+            </div>
+          ) : null}
+          {run?.status === 'interrupted' ? (
+            <div className="notice" role="status">
+              上次回复因服务中断而结束，已保留收到的内容。你可以继续发送消息。
+            </div>
+          ) : null}
 
-        <div className="composer-wrap">
-          <form
-            className="composer"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void send()
-            }}
-          >
-            <label className="sr-only" htmlFor="message">
-              发送消息
-            </label>
-            <textarea
-              id="message"
-              rows={2}
-              maxLength={32000}
-              value={draft}
-              placeholder={
-                chat.meta?.configured === false
-                  ? chat.meta.authMode === 'chatgpt'
-                    ? '请先连接 ChatGPT 并选择模型…'
-                    : '请先在服务端配置模型…'
-                  : '写下你的问题…'
-              }
-              disabled={!chat.meta?.configured || chat.loading}
-              onChange={(event) => setDraft(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault()
-                  if (!chat.active && !chat.pending) void send()
-                }
+          {chat.loading ? (
+            <div className="empty-state" role="status">
+              <span className="loading-dot" />
+              正在载入对话…
+            </div>
+          ) : chat.snapshot?.messages.length ? (
+            <MessageList messages={chat.snapshot.messages} />
+          ) : (
+            <div className="empty-state">
+              <div className="welcome-mark">π</div>
+              <p className="mb-2 text-xs uppercase tracking-[0.25em] text-teal-700 dark:text-teal-400">
+                A little room to think
+              </p>
+              <h2 className="text-3xl font-semibold tracking-tight">今天，想聊些什么？</h2>
+              <p className="mt-4 max-w-sm text-sm leading-7 text-stone-500 dark:text-stone-400">
+                整理一个想法，理解一个问题，
+                <br />
+                或从一句简单的问候开始。
+              </p>
+              <div className="mt-8 flex flex-wrap justify-center gap-2">
+                {['帮我梳理一个想法', '解释一个复杂概念', '一起制定学习计划'].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    className="suggestion"
+                    onClick={() => setDraft(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="composer-wrap">
+            <form
+              className="composer"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void send()
               }}
-            />
-            <div className="composer-bottom">
-              <span>
-                {chat.active
-                  ? run?.status === 'cancelling'
-                    ? '正在停止…'
-                    : '正在生成回复…'
-                  : 'Enter 发送 · Shift + Enter 换行'}
-              </span>
-              {chat.active ? (
-                <Button
-                  variant="outline"
-                  disabled={chat.pending || run?.status === 'cancelling'}
-                  onClick={() => void chat.cancel()}
-                >
-                  <Square className="size-3 fill-current" aria-hidden="true" />
-                  停止生成
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  aria-label="发送消息"
-                  disabled={!draft.trim() || chat.pending || chat.loading || !chat.meta?.configured}
-                >
-                  <ArrowUp aria-hidden="true" />
-                  发送
-                </Button>
-              )}
-            </div>
-          </form>
-          <p className="composer-hint">
-            {chat.meta?.capabilities.tools
-              ? '工具能力由服务端控制。'
-              : '纯聊天模式 · 未启用文件与终端工具'}
-          </p>
-        </div>
-      </main>
+            >
+              <label className="sr-only" htmlFor="message">
+                发送消息
+              </label>
+              <textarea
+                id="message"
+                rows={2}
+                maxLength={32000}
+                value={draft}
+                placeholder={
+                  chat.model?.configured === false ? '请先配置模型连接…' : '写下你的问题…'
+                }
+                disabled={!chat.model?.configured || chat.loading}
+                onChange={(event) => setDraft(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault()
+                    if (!chat.active && !chat.pending) void send()
+                  }
+                }}
+              />
+              <div className="composer-bottom">
+                <span className={chat.active ? undefined : 'composer-shortcuts'}>
+                  {chat.active
+                    ? run?.status === 'cancelling'
+                      ? '正在停止…'
+                      : '正在生成回复…'
+                    : 'Enter 发送 · Shift + Enter 换行'}
+                </span>
+                <div className="composer-actions">
+                  {chat.meta?.engine === 'pi' ? (
+                    <ModelPicker
+                      model={chat.model}
+                      disabled={chat.loading || chat.pending || chat.active}
+                      hasHistory={Boolean(
+                        chat.snapshot?.conversation.binding || chat.snapshot?.messages.length,
+                      )}
+                      onSelect={chat.chooseModel}
+                    />
+                  ) : null}
+                  {chat.active ? (
+                    <Button
+                      variant="outline"
+                      disabled={chat.pending || run?.status === 'cancelling'}
+                      onClick={() => void chat.cancel()}
+                    >
+                      <Square className="size-3 fill-current" aria-hidden="true" />
+                      停止生成
+                    </Button>
+                  ) : (
+                    <Button
+                      type="submit"
+                      aria-label="发送消息"
+                      disabled={
+                        !draft.trim() || chat.pending || chat.loading || !chat.model?.configured
+                      }
+                    >
+                      <ArrowUp aria-hidden="true" />
+                      发送
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </form>
+            <p className="composer-hint">
+              {chat.meta?.capabilities.tools
+                ? '工具能力由服务端控制。'
+                : '纯聊天模式 · 未启用文件与终端工具'}
+            </p>
+          </div>
+        </main>
+      )}
     </div>
   )
 }

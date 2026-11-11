@@ -1,54 +1,32 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {
-  parseChatGPTLogin,
-  parseChatGPTModels,
-  parseChatGPTState,
-  parseLoginRequest,
-  parseModelSelection,
-  parseProfileId,
-} from '../src/chatgpt.ts'
+import { parseChatGPTLogin, parseChatGPTModels, parseChatGPTProfile } from '../src/chatgpt.ts'
 import { CHATGPT_USAGE_URL, isChatGPTUrl } from '../src/native.ts'
 
-test('ChatGPT contracts accept public DTOs and reject malformed auth/model requests', () => {
-  assert.deepEqual(parseLoginRequest({}), {})
-  assert.deepEqual(parseLoginRequest({ profileId: 'saved-connection' }), {
-    profileId: 'saved-connection',
-  })
-  for (const invalid of [null, {}, { profileId: '../secret' }, { profileId: 3 }])
-    assert.throws(() => parseProfileId(invalid))
-  for (const invalid of [null, {}, { modelId: '' }, { modelId: 'm'.repeat(201) }])
-    assert.throws(() => parseModelSelection(invalid))
-  const state = {
-    enabled: true,
-    activeId: 'profile',
-    profiles: [
-      {
-        id: 'profile',
-        label: 'user@example.com',
-        status: 'connected',
-        planUsage: true,
-        modelId: 'model',
-      },
-    ],
+test('ChatGPT contracts accept public DTOs and reject malformed authorization status', () => {
+  const profile = {
+    id: 'profile',
+    name: 'user@example.com',
+    status: 'connected',
+    planUsage: true,
   }
-  assert.deepEqual(parseChatGPTState(state), state)
+  assert.deepEqual(parseChatGPTProfile(profile), profile)
+  for (const status of ['authorizing', 'busy'])
+    assert.equal(parseChatGPTProfile({ ...profile, status }).status, status)
   const pendingLogin = {
     id: 'attempt',
     status: 'pending',
     authorizationUrl: 'https://auth.openai.com/api/accounts/authorize',
     expiresAt: '2026-11-09T12:00:00Z',
   }
-  assert.deepEqual(parseChatGPTState({ ...state, pendingLogin }).pendingLogin, pendingLogin)
-  assert.throws(() =>
-    parseChatGPTState({ ...state, pendingLogin: { ...pendingLogin, status: 'completed' } }),
+  assert.deepEqual(parseChatGPTLogin(pendingLogin), pendingLogin)
+  assert.throws(() => parseChatGPTLogin({ ...pendingLogin, status: 'completed' }))
+  assert.equal(
+    parseChatGPTLogin({ ...pendingLogin, status: 'completed', instanceId: 'account-1' }).instanceId,
+    'account-1',
   )
-  assert.throws(() =>
-    parseChatGPTState({ ...state, profiles: [{ ...state.profiles[0], status: 'unknown' }] }),
-  )
-  assert.throws(() =>
-    parseChatGPTState({ ...state, profiles: [{ ...state.profiles[0], status: ['connected'] }] }),
-  )
+  assert.throws(() => parseChatGPTProfile({ ...profile, status: 'unknown' }))
+  assert.throws(() => parseChatGPTProfile({ ...profile, status: ['connected'] }))
   assert.throws(() => parseChatGPTModels([{ id: 'model' }]))
   assert.throws(() => parseChatGPTLogin({ id: 'login', status: 'unknown' }))
 })

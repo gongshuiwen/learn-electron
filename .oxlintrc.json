@@ -171,7 +171,8 @@
                   "react-dom/*",
                   "@learn-electron/*",
                   "**/apps/**",
-                  "**/contracts/**"
+                  "**/contracts/**",
+                  "!@learn-electron/model-connections"
                 ],
                 "message": "Agent Runtime 不依赖应用、UI 或传输协议。"
               }
@@ -197,9 +198,36 @@
                   "react-dom/*",
                   "@earendil-works/*",
                   "@learn-electron/*",
-                  "**/apps/**"
+                  "**/apps/**",
+                  "!@learn-electron/model-connections"
                 ],
                 "message": "契约保持为纯 TypeScript 类型和校验，不依赖运行时实现。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/model-connections/src/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "node:*",
+                  "electron",
+                  "electron/*",
+                  "react",
+                  "react-dom",
+                  "react-dom/*",
+                  "@earendil-works/*",
+                  "@learn-electron/*",
+                  "**/apps/**"
+                ],
+                "message": "模型连接核心保持纯 TypeScript，不依赖 SDK、应用或平台。"
               }
             ]
           }
@@ -281,7 +309,9 @@
     },
     {
       "files": ["apps/*/test/**/*.mjs", "packages/*/test/**/*.mjs", "scripts/**/*.mjs"],
-      "env": { "node": true },
+      "env": {
+        "node": true
+      },
       "globals": {
         "process": "readonly",
         "window": "readonly"

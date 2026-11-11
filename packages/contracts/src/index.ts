@@ -1,13 +1,19 @@
+import {
+  parseModelBinding,
+  parseModelRef,
+  parseModelStatus,
+  type ModelStatus,
+  type ModelRef,
+  type ModelBinding,
+} from './models.ts'
+
 export const API_VERSION = 1 as const
 export const API_PREFIX = '/api/v1'
 
-export interface ServiceMeta {
+export interface ServiceMeta extends ModelStatus {
   apiVersion: typeof API_VERSION
   engine: 'pi' | 'mock'
-  model: { provider: string; id: string }
-  configured: boolean
   capabilities: { tools: boolean }
-  authMode?: 'chatgpt'
 }
 
 export interface Conversation {
@@ -15,6 +21,8 @@ export interface Conversation {
   title: string
   createdAt: string
   updatedAt: string
+  selection?: ModelRef
+  binding?: ModelBinding
 }
 
 export interface Message {
@@ -41,6 +49,7 @@ export interface Run {
   updatedAt: string
   error?: string
   errorCode?: string
+  target?: ModelRef
 }
 
 export interface ConversationSnapshot {
@@ -48,6 +57,7 @@ export interface ConversationSnapshot {
   messages: Message[]
   run: Run | null
   sequence: number
+  model?: ModelStatus
 }
 
 interface EventBase {
@@ -68,6 +78,7 @@ export type RunEvent = EventBase &
 export interface StartRunRequest {
   message: string
   requestId: string
+  expectedTarget?: ModelRef
 }
 
 export interface ApiError {
@@ -86,7 +97,13 @@ export function parseStartRun(value: unknown): StartRunRequest {
   if (typeof value.requestId !== 'string' || !/^[\w-]{8,128}$/.test(value.requestId)) {
     throw new Error('requestId 格式无效')
   }
-  return { message: value.message.trim(), requestId: value.requestId }
+  return {
+    message: value.message.trim(),
+    requestId: value.requestId,
+    ...(value.expectedTarget === undefined
+      ? {}
+      : { expectedTarget: parseModelRef(value.expectedTarget) }),
+  }
 }
 
 export function parseTitle(value: unknown): string {
@@ -106,8 +123,19 @@ function isConversation(value: unknown): value is Conversation {
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
     typeof value.createdAt === 'string' &&
-    typeof value.updatedAt === 'string'
+    typeof value.updatedAt === 'string' &&
+    (value.selection === undefined || validModelValue(value.selection, parseModelRef)) &&
+    (value.binding === undefined || validModelValue(value.binding, parseModelBinding))
   )
+}
+
+function validModelValue(value: unknown, parse: (value: unknown) => unknown): boolean {
+  try {
+    parse(value)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function isMessage(value: unknown): value is Message {
@@ -134,7 +162,8 @@ function isRun(value: unknown): value is Run {
       value.status,
     ) &&
     (value.error === undefined || typeof value.error === 'string') &&
-    (value.errorCode === undefined || typeof value.errorCode === 'string')
+    (value.errorCode === undefined || typeof value.errorCode === 'string') &&
+    (value.target === undefined || validModelValue(value.target, parseModelRef))
   )
 }
 
@@ -148,7 +177,8 @@ function isSnapshot(value: unknown): value is ConversationSnapshot {
       (isRun(value.run) && value.run.conversationId === value.conversation.id)) &&
     typeof value.sequence === 'number' &&
     Number.isSafeInteger(value.sequence) &&
-    value.sequence >= 0
+    value.sequence >= 0 &&
+    (value.model === undefined || validModelValue(value.model, parseModelStatus))
   )
 }
 
@@ -160,23 +190,16 @@ export function parseServiceMeta(value: unknown): ServiceMeta {
     !isRecord(value) ||
     value.apiVersion !== API_VERSION ||
     (value.engine !== 'pi' && value.engine !== 'mock') ||
-    !isRecord(value.model) ||
-    typeof value.model.provider !== 'string' ||
-    typeof value.model.id !== 'string' ||
-    typeof value.configured !== 'boolean' ||
     !isRecord(value.capabilities) ||
-    typeof value.capabilities.tools !== 'boolean' ||
-    (value.authMode !== undefined && value.authMode !== 'chatgpt')
+    typeof value.capabilities.tools !== 'boolean'
   ) {
     throw new Error('服务端元信息格式不兼容，请刷新页面。')
   }
   return {
+    ...parseModelStatus(value),
     apiVersion: API_VERSION,
     engine: value.engine,
-    model: { provider: value.model.provider, id: value.model.id },
-    configured: value.configured,
     capabilities: { tools: value.capabilities.tools },
-    ...(value.authMode === 'chatgpt' ? { authMode: 'chatgpt' as const } : {}),
   }
 }
 

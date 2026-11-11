@@ -4,6 +4,7 @@ import { on, once } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { finished } from 'node:stream/promises'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -36,22 +37,28 @@ async function launch(t, { desktop = false } = {}) {
       windowsHide: true,
     },
   )
-  const exited = Promise.all([once(child, 'exit'), once(child, 'disconnect')]).then(
-    ([result]) => result,
-  )
+  // Node 24 can omit ChildProcess 'close' after an explicit IPC disconnect.
+  const closed = Promise.all([
+    once(child, 'exit'),
+    once(child, 'disconnect'),
+    finished(child.stdout, { cleanup: true }),
+    finished(child.stderr, { cleanup: true }),
+  ]).then(([result]) => result)
   const messages = []
   child.on('message', (message) => messages.push(message))
   child.stderr.resume()
+  if (desktop) child.stdout.resume()
   t.after(async () => {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')
     }
-    await exited
+    child.stdout.resume()
+    await closed
     assert.equal(dirname(resolve(directory)), resolve(tmpdir()))
     assert.ok(basename(directory).startsWith('learn-electron-entrypoint-'))
-    await rm(directory, { recursive: true, force: true })
+    await rm(directory, { recursive: true, force: true, maxRetries: 5 })
   })
-  return { child, directory, exited, messages }
+  return { child, directory, closed, messages }
 }
 
 test(
@@ -81,7 +88,7 @@ for (const shutdown of ['message', 'disconnect']) {
     `desktop entry starts through IPC and closes on ${shutdown}`,
     { timeout: 10_000 },
     async (t) => {
-      const { child, directory, exited } = await launch(t, { desktop: true })
+      const { child, directory, closed } = await launch(t, { desktop: true })
       const ready = once(child, 'message', { signal: AbortSignal.timeout(5000) })
       child.send({ type: 'start', token: TOKEN, dataDir: join(directory, 'desktop-data') })
       const [message] = await ready
@@ -93,7 +100,7 @@ for (const shutdown of ['message', 'disconnect']) {
       assert.equal(response.status, 403, 'desktop entry must ignore the working directory .env')
       if (shutdown === 'message') child.send({ type: 'shutdown' })
       else child.disconnect()
-      assert.deepEqual(await exited, [0, null])
+      assert.deepEqual(await closed, [0, null])
     },
   )
 }
@@ -102,9 +109,9 @@ test(
   'desktop startup failure reports an error and exits with status 1',
   { timeout: 10_000 },
   async (t) => {
-    const { child, directory, exited, messages } = await launch(t, { desktop: true })
+    const { child, directory, closed, messages } = await launch(t, { desktop: true })
     child.send({ type: 'start', token: '', dataDir: join(directory, 'desktop-data') })
-    assert.deepEqual(await exited, [1, null])
+    assert.deepEqual(await closed, [1, null])
     assert.equal(messages.length, 1)
     assert.equal(messages[0].type, 'error')
     assert.match(messages[0].message, /APP_API_TOKEN/)
@@ -112,9 +119,9 @@ test(
 )
 
 test('shutdown during startup closes without reporting ready', { timeout: 10_000 }, async (t) => {
-  const { child, directory, exited, messages } = await launch(t, { desktop: true })
+  const { child, directory, closed, messages } = await launch(t, { desktop: true })
   child.send({ type: 'start', token: TOKEN, dataDir: join(directory, 'desktop-data') })
   child.send({ type: 'shutdown' })
-  assert.deepEqual(await exited, [0, null])
+  assert.deepEqual(await closed, [0, null])
   assert.deepEqual(messages, [])
 })
