@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseProvidersState, parseSaveProvider, parseModelRef } from '../src/models.ts'
+import {
+  parseProvidersState,
+  parseSaveProvider,
+  parseModelRef,
+} from '@learn-electron/contracts/models'
 
 const config = {
   name: 'Gateway',
@@ -17,7 +21,7 @@ test('connection writes distinguish retained, replaced and explicitly cleared cr
   assert.throws(() => parseSaveProvider({ ...config, apiKey: '' }))
 })
 
-test('model references are available through the HTTP contracts', () => {
+test('the public models entry parses a concrete model reference', () => {
   assert.deepEqual(parseModelRef({ instanceId: 'connection-1', modelId: 'vendor/model' }), {
     instanceId: 'connection-1',
     modelId: 'vendor/model',

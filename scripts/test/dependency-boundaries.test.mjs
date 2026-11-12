@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 test('dependency boundaries cover package subpaths without blocking allowed imports', async (t) => {
-  const root = fileURLToPath(new URL('../../../', import.meta.url))
-  const directory = await mkdtemp(join(tmpdir(), 'chatgpt-auth-boundary-'))
+  const root = fileURLToPath(new URL('../../', import.meta.url))
+  const directory = await mkdtemp(join(tmpdir(), 'learn-electron-boundary-'))
   t.after(async () => {
     assert.equal(dirname(resolve(directory)), resolve(tmpdir()))
-    assert.ok(basename(directory).startsWith('chatgpt-auth-boundary-'))
+    assert.ok(basename(directory).startsWith('learn-electron-boundary-'))
     await rm(directory, { recursive: true, force: true, maxRetries: 5 })
   })
   const config = JSON.parse(await readFile(join(root, '.oxlintrc.json'), 'utf8'))

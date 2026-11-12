@@ -169,39 +169,54 @@ test(
     const explicit = await f.json('/conversations', 'POST', { selection: ref(first) })
     assert.deepEqual((await f.send(explicit.id)).run.target, ref(first))
     await f.reopen()
+    assert.deepEqual((await f.json('/model-providers')).defaultSelection, ref(second))
+    const afterRestart = await f.json('/conversations', 'POST')
+    assert.deepEqual(afterRestart.selection, ref(second))
     const replay = await f.json('/conversations/' + old.id + '/runs', 'POST', {
       message: 'bound to primary',
       requestId: 'direct-binding-request',
     })
     assert.equal(replay.id, initial.run.id)
     const onSecond = await f.send(newer.id)
+    assert.equal(onSecond.run.status, 'completed', onSecond.run.error)
     assert.deepEqual(onSecond.run.target, ref(second))
     assert.equal(f.remote.requests.at(-1).headers.authorization, 'Bearer second-instance-key')
     const continued = await f.send(old.id, 'continue primary')
+    assert.equal(continued.run.status, 'completed', continued.run.error)
     assert.deepEqual(continued.run.target, ref(first))
     assert.equal(f.remote.requests.at(-1).headers.authorization, 'Bearer !literal-application-key')
     assert.match(JSON.stringify(f.remote.requests.at(-1).body.messages), /bound to primary/)
-    await f.json('/model-providers/' + second.id, 'DELETE')
-    assert.equal((await f.json('/model-providers')).defaultSelection, null)
-    assert.equal((await f.json('/conversations/' + newer.id)).model.configured, false)
-    assert.equal((await f.json('/conversations/' + old.id)).model.configured, true)
+    assert.match(JSON.stringify(f.remote.requests.at(-1).body.messages), /Provider reply/)
     const calls = f.remote.calls
-    assert.equal(
-      (
-        await f.request('/conversations/' + newer.id + '/runs', 'POST', {
-          message: 'no fallback',
-          requestId: 'removed-instance',
-        })
-      ).status,
-      503,
-    )
-    await f.json('/model-providers')
-    await f.json('/model-providers/' + first.id + '/models')
-    assert.equal(
-      f.remote.calls,
-      calls,
-      'Unavailable bindings and resource GETs must not contact another provider',
-    )
+    for (const [removed, bound, remainingDefault] of [
+      [first, old, ref(second)],
+      [second, newer, null],
+    ]) {
+      await f.json('/model-providers/' + removed.id, 'DELETE')
+      assert.deepEqual((await f.json('/model-providers')).defaultSelection, remainingDefault)
+      assert.equal((await f.json('/meta')).configured, remainingDefault !== null)
+      assert.equal((await f.json('/conversations/' + bound.id)).model.configured, false)
+      if (remainingDefault) {
+        assert.equal((await f.json('/conversations/' + newer.id)).model.configured, true)
+        await f.json('/model-providers/' + second.id + '/models')
+      }
+      assert.equal(
+        (
+          await f.request('/conversations/' + bound.id + '/runs', 'POST', {
+            message: 'no fallback',
+            requestId: 'removed-instance',
+          })
+        ).status,
+        503,
+      )
+      assert.equal(
+        f.remote.calls,
+        calls,
+        'Unavailable bindings and resource GETs must not contact another provider',
+      )
+    }
+    const saved = await readFile(join(f.dataDir, 'models/connections.json'), 'utf8')
+    assert.doesNotMatch(saved, /second-instance-key/)
     for (const path of [
       '/model-routes',
       '/providers',
@@ -211,6 +226,54 @@ test(
       '/auth/chatgpt/model',
     ])
       assert.equal((await f.request(path, 'POST', {})).status, 404)
+  },
+)
+
+test(
+  'removing the default endpoint leaves another endpoint available without selecting a fallback',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await fixture(t)
+    const selected = await f.save()
+    const retained = await f.save({ name: 'Retained', apiKey: 'retained-instance-key' })
+    const ref = (entry) => ({ instanceId: entry.id, modelId: entry.models[0].id })
+    await f.json('/model', 'PUT', ref(selected))
+    const conversation = await f.json('/conversations', 'POST')
+    await f.send(conversation.id)
+    const explicit = await f.json('/conversations', 'POST', { selection: ref(retained) })
+    const retainedFirst = await f.send(explicit.id, 'retain this bound history')
+    assert.equal(retainedFirst.run.status, 'completed', retainedFirst.run.error)
+    const calls = f.remote.calls
+
+    await f.json(`/model-providers/${selected.id}`, 'DELETE')
+    await f.reopen()
+    const state = await f.json('/model-providers')
+    assert.equal(state.defaultSelection, null)
+    assert.deepEqual(
+      state.instances.map(({ id }) => id),
+      [retained.id],
+    )
+    assert.equal(state.instances[0].hasCredential, true)
+    assert.equal((await f.json('/meta')).configured, false)
+    assert.equal((await f.json(`/conversations/${conversation.id}`)).model.configured, false)
+    assert.equal((await f.json(`/conversations/${explicit.id}`)).model.configured, true)
+    const rejected = await f.request(`/conversations/${conversation.id}/runs`, 'POST', {
+      message: 'do not use the retained endpoint',
+      requestId: 'deleted-default-no-fallback',
+      expectedTarget: ref(selected),
+    })
+    assert.equal(rejected.status, 503)
+    assert.equal(f.remote.calls, calls)
+
+    const result = await f.send(explicit.id, 'continue the retained binding')
+    assert.equal(result.run.status, 'completed', result.run.error)
+    assert.deepEqual(result.run.target, ref(retained))
+    assert.equal(f.remote.requests.at(-1).headers.authorization, 'Bearer retained-instance-key')
+    assert.match(
+      JSON.stringify(f.remote.requests.at(-1).body.messages),
+      /retain this bound history/,
+    )
+    assert.equal((await f.json('/model-providers')).defaultSelection, null)
   },
 )
 
@@ -344,7 +407,7 @@ test(
 )
 
 test(
-  'front-end connection API persists isolated credentials, streams native context, guards changes and never falls back',
+  'connection API ignores legacy credentials, redacts secrets and rolls back failed or busy configuration changes',
   { timeout: 35_000 },
   async (t) => {
     const legacy = {
@@ -383,26 +446,10 @@ test(
     assert.equal(result.messages[1].content, 'Provider reply')
     assert.equal(f.remote.requests[0].headers.authorization, 'Bearer !literal-application-key')
     assert.equal(f.remote.requests[0].headers['x-gateway-key'], '$literal-header')
-    await f.reopen()
-    const continued = await f.send(conversation.id, 'second question')
-    assert.equal(continued.run.status, 'completed', continued.run.error)
-    assert.match(JSON.stringify(f.remote.requests[1].body.messages), /hello/)
-    assert.match(JSON.stringify(f.remote.requests[1].body.messages), /Provider reply/)
-    await f.json('/model', 'PUT', {
-      instanceId: second.id,
-      modelId: second.models[0].id,
-    })
-    const bound = await f.send(conversation.id, 'still on first instance')
-    assert.equal(bound.run.status, 'completed')
-    assert.deepEqual(bound.run.target, { instanceId: first.id, modelId: first.models[0].id })
-    assert.equal(f.remote.requests.at(-1).headers.authorization, 'Bearer !literal-application-key')
-    const another = await f.json('/conversations', 'POST')
-    assert.equal((await f.send(another.id)).run.status, 'completed')
-    assert.equal(f.remote.requests.at(-1).headers.authorization, 'Bearer different-key')
     assert.equal(
       (
-        await f.request(`/model-providers/${second.id}`, 'PATCH', {
-          ...second,
+        await f.request(`/model-providers/${first.id}`, 'PATCH', {
+          ...first,
           baseUrl: `${f.remote.url}/other`,
         })
       ).status,
@@ -412,51 +459,44 @@ test(
       Promise.reject(new Error('private-save-error')),
     )
     assert.equal(
-      (await f.request(`/model-providers/${second.id}`, 'PATCH', { ...second, name: 'Unsaved' }))
+      (await f.request(`/model-providers/${first.id}`, 'PATCH', { ...first, name: 'Unsaved' }))
         .status,
       500,
     )
     save.mock.restore()
-    assert.equal((await f.json('/model-providers')).instances[1].name, 'Gateway')
+    assert.equal((await f.json('/model-providers')).instances[0].name, 'Gateway')
     f.remote.hold = true
-    const run = await f.json(`/conversations/${another.id}/runs`, 'POST', {
+    const run = await f.json(`/conversations/${conversation.id}/runs`, 'POST', {
       message: 'hold',
       requestId: 'hold-request',
-      expectedTarget: { instanceId: second.id, modelId: second.models[0].id },
+      expectedTarget: { instanceId: first.id, modelId: first.models[0].id },
     })
     for (let i = 0; i < 100 && !f.remote.gate; i++) await delay(10)
     assert.ok(f.remote.gate)
     assert.equal(
       (
         await f.request('/model', 'PUT', {
-          instanceId: first.id,
-          modelId: first.models[0].id,
+          instanceId: second.id,
+          modelId: second.models[0].id,
         })
       ).status,
       200,
     )
-    assert.equal((await f.json(`/conversations/${another.id}`)).run.target.instanceId, second.id)
-    assert.equal((await f.request(`/model-providers/${second.id}`, 'PATCH', second)).status, 409)
+    assert.equal(
+      (await f.json(`/conversations/${conversation.id}`)).run.target.instanceId,
+      first.id,
+    )
+    assert.equal((await f.request(`/model-providers/${first.id}`, 'PATCH', first)).status, 409)
     await f.json(`/runs/${run.id}/cancel`, 'POST')
     f.remote.gate.resolve()
     await (await f.request(`/runs/${run.id}/events`)).text()
-    assert.equal((await f.json(`/conversations/${another.id}`)).run.status, 'cancelled')
+    const cancelled = await f.json(`/conversations/${conversation.id}`)
+    assert.equal(cancelled.run.status, 'cancelled')
+    assert.deepEqual(cancelled.conversation.binding, {
+      instanceId: first.id,
+      modelId: first.models[0].id,
+    })
     f.remote.hold = false
-    const calls = f.remote.requests.length
-    await f.json(`/model-providers/${second.id}`, 'DELETE')
-    assert.equal((await f.json('/meta')).configured, true)
-    assert.equal(
-      (
-        await f.request(`/conversations/${another.id}/runs`, 'POST', {
-          message: 'no fallback',
-          requestId: 'no-fallback',
-        })
-      ).status,
-      503,
-    )
-    assert.equal(f.remote.requests.length, calls)
-    const saved = await readFile(join(f.dataDir, 'models/connections.json'), 'utf8')
-    assert.doesNotMatch(saved, /different-key/)
   },
 )
 

@@ -26,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
+      - run: npm run test:boundaries
       - run: npm test --workspace @learn-electron/model-connections
       - run: npm test --workspace @learn-electron/chatgpt-auth
       - run: npm run test:contracts
