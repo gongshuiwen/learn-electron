@@ -13,6 +13,9 @@ electron.vite.config.*.timestamp-*
 logs/
 *.log
 
+# Agent temporary artifacts
+/.agent-tmp/
+
 # Local environment
 .env
 .env.*
