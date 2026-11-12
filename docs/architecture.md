@@ -31,7 +31,9 @@ flowchart LR
 
 后端按职责拆分文件，直接注入 Store：
 
-- [server.ts](../apps/server/src/server.ts)：组合资源，处理鉴权、请求校验、错误状态映射和 SSE 传输。
+- [server.ts](../apps/server/src/server.ts)：组合资源，启动服务并按顺序关闭业务、HTTP、Store 与引擎。
+- [HTTP 层](../apps/server/src/http/index.ts)：使用 Fastify 注册会话与模型路由，统一处理 Host、Origin、Bearer、预检和错误映射。为保留无正文接口与鉴权、可用性错误的优先级，当前实例禁用框架自动正文解析；新增路由也须按需读取，不能直接依赖 `request.body` 或 `schema.body`，并保留 contracts 参数校验。
+- [SSE 传输](../apps/server/src/http/events.ts)：将任务快照和事件写入原生响应流，管理心跳、慢消费者断开和订阅清理。
 - [ChatService](../apps/server/src/chat-service.ts)：处理会话操作、幂等提交、任务、取消和事件订阅。
 - [Store](../apps/server/src/store.ts)：执行数据库操作、事务、序号更新与未完成任务恢复。
 - [AgentEngine](../packages/agent-runtime/src/index.ts)：提供引擎信息、执行、上下文删除和关闭能力；取消通过 `AbortSignal`，文本增量通过 `onDelta`；HTTP 版本由服务端添加。

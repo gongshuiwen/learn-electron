@@ -9,13 +9,14 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "npm run build:server --prefix ../..",
     "pretest": "npm run typecheck",
-    "test": "node --import tsx --test --test-concurrency=2 test/*.test.mjs"
+    "test": "node --import tsx --test --test-concurrency=2 \"test/**/*.test.mjs\""
   },
   "dependencies": {
-    "@learn-electron/model-connections": "*",
     "@learn-electron/agent-runtime": "*",
     "@learn-electron/chatgpt-auth": "*",
     "@learn-electron/contracts": "*",
+    "@learn-electron/model-connections": "*",
+    "fastify": "5.12.8",
     "proper-lockfile": "4.1.2"
   },
   "devDependencies": {

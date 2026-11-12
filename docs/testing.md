@@ -18,11 +18,20 @@ Web 界面测试使用 Playwright 和本机 Chrome，可用 `PLAYWRIGHT_CHANNEL=
 
 CI 在各平台运行连接核心、认证包、contracts、后端、Runtime 和桌面测试，并在 Windows 运行 Web 测试。桌面 CI 使用 `npm run test:desktop` 执行冒烟与完整集成测试。根目录的桌面测试入口统一使用 `test:desktop` 前缀，转发到桌面工作区的 `test`、`test:smoke` 和 `test:packaged`；工作区的准备钩子会自动执行。其他测试命令见 [根脚本](../package.json)与各工作区的 `package.json`。
 
-## 单文件测试
+## 定向测试
 
 通过 npm 测试脚本运行时，已声明的 `pretest` 等准备步骤会自动执行；直接运行 `node --test` 会跳过这些步骤。
 
 桌面和 Web 界面测试需要与当前源码匹配的构建产物，单文件运行前先执行所属工作区的 `pretest`。后端、contracts 和 Runtime 测试不依赖桌面产物。
+
+后端可按层定向运行，例如：
+
+```powershell
+npm run typecheck:server
+node --import tsx --test --test-concurrency=2 "apps/server/test/http/*.test.mjs"
+```
+
+将 `http` 换成 `component` 或 `integration` 可运行其他层；`npm run test:server` 递归执行全部后端测试并自动运行类型检查。
 
 桌面单文件测试示例：
 
@@ -48,6 +57,8 @@ node --test --test-concurrency=1 apps/desktop/test/integration/lifecycle.test.mj
 | 桌面集成  | 真实本地后端与 mock 引擎的集成链路               |
 
 崩溃恢复测试覆盖正常恢复与恢复启动阶段的超时取消。取消回归用受控 Promise 暂停启动，验证启动结束、服务关闭、目录删除的顺序，并检查取消后不再执行后续恢复操作。
+
+后端测试按被测入口组织：`component` 直接验证服务和存储，可使用真实 SQLite 与本地 OAuth 夹具；`http` 使用真实 HTTP/SSE 连接；`integration` 覆盖跨模块、进程与生命周期。共享夹具放在 `helpers`。HTTP 测试覆盖 Host、Origin、Bearer 与预检顺序、路由方法、按需读取正文及大小边界；关闭回归读取 SSE 至正常结束，并核对中断事件。
 
 SSE 快照准备包含异步模型状态读取，回归覆盖准备期间任务结束和客户端断开：返回最新终态，或释放新建订阅，不留下等待中的连接，也不取消模型生成。
 

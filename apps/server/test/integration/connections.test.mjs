@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
-import { startServer } from '../src/server.ts'
+import { startServer } from '../../src/server.ts'
 import { createMockEngine } from '@learn-electron/agent-runtime'
-import { ProtectedFile } from '../src/protected-file.ts'
+import { ProtectedFile } from '../../src/protected-file.ts'
 import { createServer } from 'node:http'
-import { ChatGPTProvider } from '../src/chatgpt/provider.ts'
-import { oauthFixture } from './helpers/chatgpt.mjs'
-import { modelProvider } from './helpers/model-provider.mjs'
+import { ChatGPTProvider } from '../../src/chatgpt/provider.ts'
+import { oauthFixture } from '../helpers/chatgpt.mjs'
+import { modelProvider } from '../helpers/model-provider.mjs'
 
 async function fixture(t, overrides = {}) {
   const remote = await modelProvider(t)

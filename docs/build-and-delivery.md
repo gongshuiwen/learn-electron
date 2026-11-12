@@ -13,7 +13,7 @@
 
 ## 后端构建
 
-[build-server.mjs](../scripts/build-server.mjs) 打包工作区源码，在 `out/server` 生成独立启动入口 `index.mjs`、桌面入口 `desktop-child.mjs` 和程序化入口 `server.mjs`；Pi 等第三方生产依赖保持外置，独立部署时需一并提供。
+[build-server.mjs](../scripts/build-server.mjs) 打包工作区源码，在 `out/server` 生成独立启动入口 `index.mjs`、桌面入口 `desktop-child.mjs` 和程序化入口 `server.mjs`；Fastify、Pi 等第三方生产依赖保持外置，独立部署时需一并提供。
 
 ## 独立 Web 部署
 

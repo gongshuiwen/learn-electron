@@ -5,10 +5,10 @@ import { dirname, join, resolve } from 'node:path'
 import { Server } from 'node:http'
 import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
-import { ChatGPTProvider } from '../src/chatgpt/provider.ts'
-import { ConnectionStorage } from '../src/chatgpt/storage.ts'
+import { ChatGPTProvider } from '../../src/chatgpt/provider.ts'
+import { ConnectionStorage } from '../../src/chatgpt/storage.ts'
 import { getOpenAIModels } from '@learn-electron/agent-runtime'
-import { oauthFixture } from './helpers/chatgpt.mjs'
+import { oauthFixture } from '../helpers/chatgpt.mjs'
 
 async function fixture(t) {
   const remote = await oauthFixture(t)

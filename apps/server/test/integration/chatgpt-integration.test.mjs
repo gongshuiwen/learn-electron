@@ -5,11 +5,11 @@ import { dirname, join, resolve } from 'node:path'
 import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
 import { ChatGPTOAuth, PLAN_SCOPE } from '@learn-electron/chatgpt-auth'
-import { startServer } from '../src/server.ts'
-import { ChatService } from '../src/chat-service.ts'
-import { ConnectionStorage } from '../src/chatgpt/storage.ts'
-import { ProtectedFile } from '../src/protected-file.ts'
-import { oauthFixture } from './helpers/chatgpt.mjs'
+import { startServer } from '../../src/server.ts'
+import { ChatService } from '../../src/chat-service.ts'
+import { ConnectionStorage } from '../../src/chatgpt/storage.ts'
+import { ProtectedFile } from '../../src/protected-file.ts'
+import { oauthFixture } from '../helpers/chatgpt.mjs'
 
 test(
   'HTTP OAuth and explicit model selection preserve Pi context across restart and account changes without API-key fallback',

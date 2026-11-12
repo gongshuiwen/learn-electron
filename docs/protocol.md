@@ -1,6 +1,6 @@
 # 前后端协议
 
-本文记录当前 `/api/v1` 的交互语义。字段、联合类型和参数校验以 [contracts](../packages/contracts/src/index.ts) 为准；HTTP 行为见 [server.ts](../apps/server/src/server.ts)，任务语义见 [ChatService](../apps/server/src/chat-service.ts)。
+本文记录当前 `/api/v1` 的交互语义。字段、联合类型和参数校验以 [contracts](../packages/contracts/src/index.ts) 为准；HTTP 行为见 [HTTP 层](../apps/server/src/http/index.ts)，任务语义见 [ChatService](../apps/server/src/chat-service.ts)。
 
 ## 通用约定
 

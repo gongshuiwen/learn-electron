@@ -28,7 +28,7 @@ async function launch(t, { desktop = false } = {}) {
     [
       '--import',
       LOADER,
-      fileURLToPath(new URL(`../src/${desktop ? 'desktop-child' : 'cli'}.ts`, import.meta.url)),
+      fileURLToPath(new URL(`../../src/${desktop ? 'desktop-child' : 'cli'}.ts`, import.meta.url)),
     ],
     {
       cwd: directory,
