@@ -12,7 +12,7 @@ import {
   type ModelTarget,
 } from '@learn-electron/model-connections'
 import type { ProvidersState } from '@learn-electron/contracts/models'
-import { HttpError } from '../errors.ts'
+import { ApplicationError } from '../errors.ts'
 import type { ModelAccounts } from '../model-service.ts'
 import { ConnectionStorage } from './storage.ts'
 
@@ -24,15 +24,7 @@ function translate(error: unknown): never {
     error.code === 'provider_failed'
   )
     throw new ModelError(error.code, { cause: error })
-  const status =
-    error.code === 'shutting_down'
-      ? 503
-      : error.code === 'connection_not_found' || error.code === 'login_not_found'
-        ? 404
-        : error.code === 'model_unavailable'
-          ? 400
-          : 409
-  throw new HttpError(status, error.code, error.message)
+  throw new ApplicationError(error.code, error.message, { cause: error })
 }
 
 function attempt<T>(action: () => T): T {
@@ -81,7 +73,7 @@ export class ChatGPTProvider implements ModelAccounts {
 
   private available(id: string): void {
     if (this.isBusy(id) || this.isUpdating(id))
-      throw new HttpError(409, 'connection_busy', '请先停止生成，再更改模型连接')
+      throw new ApplicationError('connection_busy', '请先停止生成，再更改模型连接')
   }
 
   status() {
@@ -138,13 +130,13 @@ export class ChatGPTProvider implements ModelAccounts {
     attempt(() => this.auth.cancelLogin(id))
   }
   async logout(id: string, stop: () => Promise<void>) {
-    if (this.isUpdating(id)) throw new HttpError(409, 'connection_busy', '模型连接正在更新')
+    if (this.isUpdating(id)) throw new ApplicationError('connection_busy', '模型连接正在更新')
     return await attemptAsync(() => this.auth.logout(id, stop))
   }
   model(instanceId: string, modelId: string): ChatGPTModel {
     const model = attempt(() => this.auth.model(instanceId, modelId))
     if (!this.supported.has(modelId))
-      throw new HttpError(400, 'model_unavailable', '请选择当前连接可用的模型')
+      throw new ApplicationError('model_unavailable', '请选择当前连接可用的模型')
     return model
   }
   resolve(ref: ModelRef): ModelTarget {

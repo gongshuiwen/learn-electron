@@ -3,7 +3,17 @@ import { once } from 'node:events'
 
 /** Real local wire protocols; no SDK/session mocks. Shared with browser acceptance. */
 export async function modelProvider(t) {
-  const remote = { requests: [], calls: 0, hold: false, gate: null, status: 200, url: '' }
+  const remote = {
+    requests: [],
+    calls: 0,
+    hold: false,
+    gate: null,
+    holdCatalog: false,
+    catalogStarted: Promise.withResolvers(),
+    catalogGate: null,
+    status: 200,
+    url: '',
+  }
   const server = createServer((request, response) => {
     remote.calls++
     void (async () => {
@@ -12,6 +22,12 @@ export async function modelProvider(t) {
       const body = Buffer.concat(chunks).toString()
       const path = new URL(request.url, remote.url).pathname
       if (request.method === 'GET' && path.endsWith('/models')) {
+        if (remote.holdCatalog) {
+          remote.catalogGate = Promise.withResolvers()
+          remote.catalogStarted.resolve()
+          await Promise.race([remote.catalogGate.promise, once(response, 'close')])
+          if (response.destroyed) return
+        }
         response.writeHead(200, { 'Content-Type': 'application/json' })
         response.end(
           JSON.stringify({
@@ -151,6 +167,7 @@ export async function modelProvider(t) {
   remote.url = `http://127.0.0.1:${server.address().port}`
   t.after(async () => {
     remote.gate?.resolve()
+    remote.catalogGate?.resolve()
     server.closeAllConnections()
     await new Promise((done) => server.close(done))
   })

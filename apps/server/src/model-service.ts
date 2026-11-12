@@ -24,7 +24,7 @@ import type {
   ProvidersState,
   SaveProviderRequest,
 } from '@learn-electron/contracts/models'
-import { HttpError } from './errors.ts'
+import { ApplicationError } from './errors.ts'
 import { ProtectedFile } from './protected-file.ts'
 
 /** Account-backed models are supplied by the application, independent of their auth implementation. */
@@ -82,8 +82,10 @@ function decode(value: unknown): SavedState {
 /** Application-owned instances and model choices. Runtime receives only resolved targets and credentials. */
 export class ModelService implements CredentialResolver {
   private readonly changing = new Set<string>()
+  private readonly pending = new Set<Promise<unknown>>()
   private closed = false
   private tail: Promise<unknown> = Promise.resolve()
+  private closePromise: Promise<void> | undefined
   private readonly shutdown = new AbortController()
   private constructor(
     private state: SavedState,
@@ -111,18 +113,38 @@ export class ModelService implements CredentialResolver {
     return new ModelService(state, file, accounts, isBusy)
   }
 
-  private change<T>(operation: () => Promise<T>, instanceId?: string): Promise<T> {
-    if (this.closed) return Promise.reject(new HttpError(503, 'shutting_down', '服务正在停止'))
+  private guard<T>(operation: () => Promise<T>, instanceId?: string): Promise<T> {
+    if (this.closed) return Promise.reject(new ApplicationError('shutting_down', '服务正在停止'))
     if (instanceId && (this.changing.has(instanceId) || this.isBusy(instanceId)))
       return Promise.reject(
-        new HttpError(409, 'connection_busy', '该供应商实例正在使用或更新，请稍后再试'),
+        new ApplicationError('connection_busy', '该供应商实例正在使用或更新，请稍后再试'),
       )
     if (instanceId) this.changing.add(instanceId)
-    const result = this.tail.then(operation).finally(() => {
-      if (instanceId) this.changing.delete(instanceId)
+    const result = Promise.resolve()
+      .then(() => {
+        if (this.closed) throw new ApplicationError('shutting_down', '服务正在停止')
+        return operation()
+      })
+      .finally(() => {
+        if (instanceId) this.changing.delete(instanceId)
+      })
+    this.pending.add(result)
+    void result.then(
+      () => this.pending.delete(result),
+      () => this.pending.delete(result),
+    )
+    return result
+  }
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.tail.then(() => {
+      if (this.closed) throw new ApplicationError('shutting_down', '服务正在停止')
+      return operation()
     })
     this.tail = result.catch(() => {})
     return result
+  }
+  private change<T>(operation: () => Promise<T>, instanceId?: string): Promise<T> {
+    return this.guard(() => this.enqueue(operation), instanceId)
   }
   private async commit(next: SavedState): Promise<void> {
     await this.file.save(next)
@@ -130,7 +152,7 @@ export class ModelService implements CredentialResolver {
   }
   private endpoint(id: string): SavedInstance {
     const entry = this.state.instances.find((item) => item.id === id)
-    if (!entry) throw new HttpError(404, 'provider_not_found', '模型供应商实例不存在')
+    if (!entry) throw new ApplicationError('provider_not_found', '模型供应商实例不存在')
     return entry
   }
   defaultSelection(): ModelRef | null {
@@ -184,7 +206,7 @@ export class ModelService implements CredentialResolver {
         ...(account ? { authMode: account.authMode } : {}),
       }
     } catch (error) {
-      if (!(error instanceof ModelError || error instanceof HttpError)) throw error
+      if (!(error instanceof ModelError || error instanceof ApplicationError)) throw error
       const instanceId = ref?.instanceId
       const account = instanceId ? this.accounts.describe(instanceId) : undefined
       const endpoint = this.state.instances.find(({ id }) => id === instanceId)
@@ -203,14 +225,14 @@ export class ModelService implements CredentialResolver {
   }
 
   private target(ref: ModelRef): ModelTarget {
-    if (this.closed) throw new HttpError(503, 'shutting_down', '服务正在停止')
+    if (this.closed) throw new ApplicationError('shutting_down', '服务正在停止')
     if (this.changing.has(ref.instanceId))
-      throw new HttpError(409, 'connection_busy', '该供应商实例正在更新')
+      throw new ApplicationError('connection_busy', '该供应商实例正在更新')
     const entry = this.state.instances.find(({ id }) => id === ref.instanceId)
     if (!entry) return this.accounts.resolve(ref)
     this.endpointCredentials(entry)
     const model = entry.models.find(({ id }) => id === ref.modelId)
-    if (!model) throw new HttpError(400, 'model_unavailable', '该实例未配置此模型')
+    if (!model) throw new ApplicationError('model_unavailable', '该实例未配置此模型')
     return {
       instanceId: entry.id,
       revision: entry.revision,
@@ -251,8 +273,7 @@ export class ModelService implements CredentialResolver {
         existing &&
         (existing.baseUrl !== request.baseUrl || existing.protocol !== request.protocol)
       )
-        throw new HttpError(
-          409,
+        throw new ApplicationError(
           'connection_identity_changed',
           '地址或协议变更请添加新实例，以保留会话归属',
         )
@@ -275,20 +296,27 @@ export class ModelService implements CredentialResolver {
   }
   remove(id: string): Promise<ProvidersState> {
     const endpoint = this.state.instances.some((item) => item.id === id)
-    return this.change(
-      async () => {
+    if (endpoint)
+      return this.change(async () => {
         const next = structuredClone(this.state)
         next.instances = next.instances.filter((item) => item.id !== id)
         if (next.defaultSelection?.instanceId === id) next.defaultSelection = null
-        if (endpoint) await this.commit(next)
-        else await this.accounts.removeProfile(id, () => this.commit(next))
+        await this.commit(next)
         return this.status()
-      },
-      endpoint ? id : undefined,
-    )
+      }, id)
+    return this.guard(async () => {
+      await this.accounts.removeProfile(id, () =>
+        this.enqueue(async () => {
+          const next = structuredClone(this.state)
+          if (next.defaultSelection?.instanceId === id) next.defaultSelection = null
+          await this.commit(next)
+        }),
+      )
+      return this.status()
+    })
   }
   createAccount(): Promise<ProvidersState> {
-    return this.change(async () => {
+    return this.guard(async () => {
       await this.accounts.createProfile()
       return this.status()
     })
@@ -307,24 +335,26 @@ export class ModelService implements CredentialResolver {
       : this.accounts.models(id).then((items) => items.map(parseModelDefinition))
   }
   refreshModels(id: string): Promise<ModelDefinition[]> {
-    if (this.closed) return Promise.reject(new HttpError(503, 'shutting_down', '服务正在停止'))
+    if (this.closed) return Promise.reject(new ApplicationError('shutting_down', '服务正在停止'))
     const entry = this.state.instances.find((item) => item.id === id)
     if (!entry)
       return this.accounts.models(id, true).then((items) => items.map(parseModelDefinition))
-    return this.change(async () => {
+    return this.guard(async () => {
       const models = await discoverEndpointModels(
         entry,
         this.endpointCredentials(entry),
         AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(15_000)]),
       )
-      const next = structuredClone(this.state)
-      const saved = next.instances.find((item) => item.id === id)!
-      const merged = new Map(entry.models.map((model) => [model.id, model]))
-      for (const model of models) if (!merged.has(model.id)) merged.set(model.id, model)
-      saved.models = [...merged.values()].slice(0, 200)
-      saved.revision++
-      await this.commit(next)
-      return structuredClone(saved.models)
+      return this.enqueue(async () => {
+        const next = structuredClone(this.state)
+        const saved = next.instances.find((item) => item.id === id)!
+        const merged = new Map(saved.models.map((model) => [model.id, model]))
+        for (const model of models) if (!merged.has(model.id)) merged.set(model.id, model)
+        saved.models = [...merged.values()].slice(0, 200)
+        saved.revision++
+        await this.commit(next)
+        return structuredClone(saved.models)
+      })
     }, id)
   }
   test(
@@ -334,15 +364,21 @@ export class ModelService implements CredentialResolver {
   ): Promise<void> {
     // Target resolution runs before the instance is marked as updating.
     const target = this.target({ instanceId: id, modelId })
-    return this.change(
+    return this.guard(
       () => execute(target, AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(15_000)])),
       id,
     )
   }
-  async close(): Promise<void> {
-    this.closed = true
-    this.shutdown.abort()
-    const results = await Promise.allSettled([this.tail, this.accounts.close()])
-    for (const result of results) if (result.status === 'rejected') throw result.reason
+  close(): Promise<void> {
+    this.closePromise ??= (async () => {
+      this.closed = true
+      this.shutdown.abort()
+      const results = await Promise.allSettled([
+        Promise.allSettled(this.pending),
+        this.accounts.close(),
+      ])
+      for (const result of results) if (result.status === 'rejected') throw result.reason
+    })()
+    return this.closePromise
   }
 }

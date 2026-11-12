@@ -10,6 +10,20 @@ import { acquireDataDirectory } from './ownership.ts'
 import { Store } from './store.ts'
 import { waitWithin } from './wait-within.ts'
 
+async function closeEngineAndRelease(
+  engine: AgentEngine,
+  releaseOwnership: () => Promise<void>,
+): Promise<void> {
+  const closing = engine.close()
+  if (await waitWithin(closing, 3000)) await releaseOwnership()
+  else {
+    // A slow engine may still write its native context after the caller returns.
+    void closing
+      .then(() => releaseOwnership())
+      .catch(() => console.error('模型引擎延迟关闭或数据目录锁释放失败'))
+  }
+}
+
 export interface ServerOptions {
   port?: number
   host?: string
@@ -50,8 +64,11 @@ export async function startServer(
         ...(models ? { credentials: models } : {}),
       }))
   } catch (error) {
-    await (models ?? chatgpt)?.close()
-    await releaseOwnership()
+    try {
+      await (models ?? chatgpt)?.close()
+    } finally {
+      await releaseOwnership()
+    }
     throw error
   }
   let store: Store
@@ -59,10 +76,9 @@ export async function startServer(
     store = new Store(join(directory, 'app.sqlite'))
   } catch (error) {
     try {
-      await waitWithin(engine.close(), 3000)
       await (models ?? chatgpt)?.close()
     } finally {
-      await releaseOwnership()
+      await closeEngineAndRelease(engine, releaseOwnership)
     }
     throw error
   }
@@ -98,12 +114,7 @@ export async function startServer(
             try {
               store.close()
             } finally {
-              const engineClosing = engine.close()
-              if (await waitWithin(engineClosing, 3000)) await releaseOwnership()
-              else {
-                // Keep the lease until a stuck engine stops writing its native context.
-                void engineClosing.then(releaseOwnership).catch(() => {})
-              }
+              await closeEngineAndRelease(engine, releaseOwnership)
             }
           }
         }
@@ -115,11 +126,13 @@ export async function startServer(
   } catch (error) {
     await http?.close().catch(() => {})
     try {
-      store.close()
-      await waitWithin(engine.close(), 3000)
-      await (models ?? chatgpt)?.close()
+      try {
+        store.close()
+      } finally {
+        await (models ?? chatgpt)?.close()
+      }
     } finally {
-      await releaseOwnership()
+      await closeEngineAndRelease(engine, releaseOwnership)
     }
     throw error
   }

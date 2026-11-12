@@ -5,12 +5,18 @@ import { API_PREFIX, type ApiError } from '@learn-electron/contracts'
 import { ModelError, type AgentEngine } from '@learn-electron/agent-runtime'
 import type { ChatService } from '../chat-service.ts'
 import type { ChatGPTProvider } from '../chatgpt/provider.ts'
-import { ChatError, HttpError, type ChatErrorCode } from '../errors.ts'
+import {
+  ApplicationError,
+  ChatError,
+  HttpError,
+  type ApplicationErrorCode,
+  type ChatErrorCode,
+} from '../errors.ts'
 import type { ModelService } from '../model-service.ts'
 import { registerChatRoutes } from './chat-routes.ts'
 import { registerModelRoutes } from './model-routes.ts'
 
-const CHAT_ERROR_STATUS: Record<ChatErrorCode, number> = {
+const SERVICE_ERROR_STATUS: Record<ChatErrorCode | ApplicationErrorCode, number> = {
   conversation_not_found: 404,
   run_not_found: 404,
   conversation_busy: 409,
@@ -19,6 +25,14 @@ const CHAT_ERROR_STATUS: Record<ChatErrorCode, number> = {
   storage_unavailable: 503,
   shutting_down: 503,
   connection_changed: 409,
+  connection_busy: 409,
+  connection_identity_changed: 409,
+  provider_not_found: 404,
+  connection_not_found: 404,
+  model_unavailable: 400,
+  authorization_active: 409,
+  login_pending: 409,
+  login_not_found: 404,
 }
 
 function authenticates(header: string | undefined, token: string): boolean {
@@ -116,8 +130,8 @@ export function createHttpServer(options: {
     const failure =
       error instanceof HttpError
         ? error
-        : error instanceof ChatError
-          ? new HttpError(CHAT_ERROR_STATUS[error.code], error.code, error.message)
+        : error instanceof ChatError || error instanceof ApplicationError
+          ? new HttpError(SERVICE_ERROR_STATUS[error.code], error.code, error.message)
           : error instanceof ModelError
             ? new HttpError(503, error.code, error.message)
             : new HttpError(500, 'internal_error', '服务处理请求失败')

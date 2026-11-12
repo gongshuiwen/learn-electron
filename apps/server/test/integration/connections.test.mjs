@@ -250,6 +250,48 @@ test(
 )
 
 test(
+  'model discovery preserves other instances and their changes while the remote catalog is pending',
+  { timeout: 25_000 },
+  async (t) => {
+    const f = await fixture(t)
+    const first = await f.save()
+    const second = await f.save()
+    f.remote.holdCatalog = true
+    const refresh = f.json(`/model-providers/${first.id}/models/refresh`, 'POST')
+    let selection
+    try {
+      await Promise.race([
+        f.remote.catalogStarted.promise,
+        refresh.then(() => {
+          throw new Error('Catalog discovery finished before the gate opened')
+        }),
+      ])
+      selection = f.json('/model', 'PUT', { instanceId: second.id, modelId: second.models[0].id })
+      const selected = await Promise.race([selection, delay(3000, null, { ref: false })])
+      assert.ok(selected, 'another instance must not wait for model discovery')
+      assert.equal((await f.request(`/model-providers/${first.id}`, 'PATCH', first)).status, 409)
+      await f.json(`/model-providers/${second.id}`, 'PATCH', { ...second, name: 'Updated' })
+    } finally {
+      f.remote.catalogGate?.resolve()
+      await Promise.allSettled([refresh, selection])
+    }
+    assert.ok((await refresh).some(({ id }) => id === 'discovered-model'))
+    await f.reopen()
+    const state = await f.json('/model-providers')
+    assert.deepEqual(state.defaultSelection, {
+      instanceId: second.id,
+      modelId: second.models[0].id,
+    })
+    assert.equal(state.instances.find(({ id }) => id === second.id).name, 'Updated')
+    assert.ok(
+      state.instances
+        .find(({ id }) => id === first.id)
+        .models.some(({ id }) => id === 'discovered-model'),
+    )
+  },
+)
+
+test(
   'a demo conversation is never continued against a real provider',
   { timeout: 25_000 },
   async (t) => {

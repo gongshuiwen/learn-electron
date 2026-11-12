@@ -79,11 +79,9 @@ export function registerModelRoutes(
     const service = requireModels()
     if (request.method !== 'POST') return methodNotAllowed()
     const { modelId } = parse(parseProviderTest, await readJson(request.raw))
-    if (!engine.testConnection)
-      throw new HttpError(409, 'engine_disabled', '当前引擎不支持连接测试')
-    await service.test(request.params.id, modelId, (target, signal) =>
-      engine.testConnection!(target, signal),
-    )
+    const execute = engine.testConnection?.bind(engine)
+    if (!execute) throw new HttpError(409, 'engine_disabled', '当前引擎不支持连接测试')
+    await service.test(request.params.id, modelId, execute)
     return reply.code(204).send()
   })
 

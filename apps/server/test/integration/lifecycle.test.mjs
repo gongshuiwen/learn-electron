@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { setImmediate, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
 import { startServer } from '../../src/server.ts'
+import { acquireDataDirectory } from '../../src/ownership.ts'
 import {
   TOKEN,
   client,
@@ -229,6 +230,49 @@ test('a listen failure releases data directory ownership for an immediate retry'
   assert.equal((await client(recovered.url)('/meta')).status, 200)
   assert.deepEqual(await (await client(recovered.url)('/conversations')).json(), [])
 })
+
+test(
+  'a listen failure retains ownership until a slow engine has stopped',
+  { timeout: 15_000 },
+  async (t) => {
+    const occupying = await fixture(t)
+    const dataDir = await mkdtemp(join(tmpdir(), 'learn-electron-listen-drain-'))
+    const finishClose = Promise.withResolvers()
+    let closingStarted = false
+    const slow = engine()
+    slow.close = () => {
+      closingStarted = true
+      return finishClose.promise
+    }
+    let recovered
+    t.after(async () => {
+      finishClose.resolve()
+      await recovered?.close()
+      if (!recovered) {
+        const release = await acquireDataDirectory(dataDir)
+        await release()
+      }
+      assert.equal(dirname(resolve(dataDir)), resolve(tmpdir()))
+      assert.ok(basename(dataDir).startsWith('learn-electron-listen-drain-'))
+      await rm(dataDir, { recursive: true, force: true, maxRetries: 5 })
+    })
+
+    await assert.rejects(
+      startServer({
+        token: TOKEN,
+        dataDir,
+        port: Number(new URL(occupying.url).port),
+        engine: slow,
+      }),
+      { code: 'EADDRINUSE' },
+    )
+    assert.equal(closingStarted, true)
+    await access(join(dataDir, '.service.lock'))
+    finishClose.resolve()
+    recovered = await startServer({ token: TOKEN, dataDir, engine: engine() })
+    assert.equal((await client(recovered.url)('/meta')).status, 200)
+  },
+)
 
 test('conversation deletion cleans native context before metadata and excludes new work', async (t) => {
   let finishDelete
