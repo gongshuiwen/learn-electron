@@ -5,11 +5,10 @@ import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { getOpenAIModels } from '@learn-electron/agent-runtime'
 import { ModelError } from '@learn-electron/model-connections'
-import { ChatGPTProvider } from '../../src/chatgpt/provider.ts'
-import { ConnectionStorage } from '../../src/chatgpt/storage.ts'
-import { ApplicationError } from '../../src/errors.ts'
-import { ProtectedFile } from '../../src/protected-file.ts'
-import { finishLogin, oauthFixture } from '../helpers/chatgpt.mjs'
+import { ChatGPTProvider } from '../../../src/chatgpt/index.ts'
+import { ConnectionStorage } from '../../../src/chatgpt/storage.ts'
+import { ApplicationError, ProtectedFile } from '../../../src/shared/index.ts'
+import { finishLogin, oauthFixture } from '../../helpers/chatgpt.mjs'
 
 async function fixture(t) {
   const remote = await oauthFixture(t)

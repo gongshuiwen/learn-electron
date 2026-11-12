@@ -1,7 +1,7 @@
 import type { ServerResponse } from 'node:http'
 import type { FastifyReply } from 'fastify'
 import type { RunEvent } from '@learn-electron/contracts'
-import type { ChatService } from '../chat-service.ts'
+import type { ChatService } from '../chat/index.ts'
 
 const MAX_STREAM_BUFFER = 1024 * 1024
 

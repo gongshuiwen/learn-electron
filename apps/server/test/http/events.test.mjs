@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { ServerResponse } from 'node:http'
 import test from 'node:test'
-import { ChatService } from '../../src/chat-service.ts'
+import { ChatService } from '../../src/chat/index.ts'
 import { create, engine, events, fixture, settled, start } from '../helpers/server.mjs'
 
 test('real HTTP/SSE streams snapshot, ordered deltas, final message and terminal run', async (t) => {

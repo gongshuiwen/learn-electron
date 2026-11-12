@@ -19,7 +19,7 @@
 
 ## 参考
 
-- 模块、配置、数据归属和生命周期参见 [整体架构](docs/architecture.md)，依赖边界见 [.oxlintrc.json](.oxlintrc.json)。
+- 模块、配置、数据归属和生命周期参见 [整体架构](docs/architecture.md)，依赖边界见 [.oxlintrc.json](.oxlintrc.json)与[后端模块检查](scripts/check-server-modules.mjs)。
 - HTTP/SSE 行为参见 [前后端协议](docs/protocol.md)，类型与校验见 [HTTP 契约](packages/contracts/src/index.ts)和[原生桥契约](packages/contracts/src/native.ts)。
 - 环境与运行命令参见 [README](README.md)与[根脚本](package.json)。
 - 测试准备与执行参见 [测试指南](docs/testing.md)。

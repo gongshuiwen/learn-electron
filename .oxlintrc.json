@@ -171,7 +171,7 @@
       }
     },
     {
-      "files": ["apps/server/src/model-service.ts", "apps/server/src/chat-service.ts"],
+      "files": ["apps/server/src/models/**/*.ts", "apps/server/src/chat/**/*.ts"],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -192,7 +192,6 @@
                   "@learn-electron/desktop/**",
                   "@learn-electron/chatgpt-auth",
                   "@learn-electron/chatgpt-auth/**",
-                  "./chatgpt/**",
                   "**/apps/**",
                   "**/packages/**"
                 ],

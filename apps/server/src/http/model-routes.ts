@@ -7,10 +7,10 @@ import {
   parseSaveProvider,
 } from '@learn-electron/contracts/models'
 import { isObject } from '@learn-electron/model-connections'
-import type { ChatService } from '../chat-service.ts'
-import type { ChatGPTProvider } from '../chatgpt/provider.ts'
-import { HttpError } from '../errors.ts'
-import type { ModelService } from '../model-service.ts'
+import type { ChatService } from '../chat/index.ts'
+import type { ChatGPTProvider } from '../chatgpt/index.ts'
+import { HttpError } from './errors.ts'
+import type { ModelService } from '../models/index.ts'
 import { ID_PARAM, methodNotAllowed, parse, readJson, type IdParams } from './shared.ts'
 
 export function registerModelRoutes(

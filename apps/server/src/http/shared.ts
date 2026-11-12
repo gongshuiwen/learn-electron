@@ -1,5 +1,5 @@
 import type { IncomingMessage } from 'node:http'
-import { HttpError } from '../errors.ts'
+import { HttpError } from './errors.ts'
 
 const MAX_BODY_BYTES = 160 * 1024
 

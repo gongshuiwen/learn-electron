@@ -1,6 +1,6 @@
 import { modelRef, type ModelTarget, type ModelRef } from '@learn-electron/model-connections'
 import type { ModelStatus } from '@learn-electron/contracts/models'
-import type { ModelService } from './model-service.ts'
+import type { ModelService } from '../models/index.ts'
 import {
   API_VERSION,
   isActiveRun,
@@ -12,9 +12,9 @@ import {
 } from '@learn-electron/contracts'
 import type { AgentEngine, EngineRunInput } from '@learn-electron/agent-runtime'
 import { ModelError } from '@learn-electron/agent-runtime'
+import { waitWithin } from '../shared/index.ts'
 import { ChatError } from './errors.ts'
 import type { Store } from './store.ts'
-import { waitWithin } from './wait-within.ts'
 
 interface ActiveRun {
   controller: AbortController

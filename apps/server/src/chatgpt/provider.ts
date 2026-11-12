@@ -12,8 +12,8 @@ import {
   type ModelTarget,
 } from '@learn-electron/model-connections'
 import type { ProvidersState } from '@learn-electron/contracts/models'
-import { ApplicationError } from '../errors.ts'
-import type { ModelAccounts } from '../model-service.ts'
+import { ApplicationError } from '../shared/index.ts'
+import type { ModelAccounts } from '../models/index.ts'
 import { ConnectionStorage } from './storage.ts'
 
 function translate(error: unknown): never {

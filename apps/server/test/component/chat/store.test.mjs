@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
-import { Store } from '../../src/store.ts'
+import { Store } from '../../../src/chat/index.ts'
 
 test('run finalization rolls back together and committed results survive reopening', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'learn-electron-finalize-'))

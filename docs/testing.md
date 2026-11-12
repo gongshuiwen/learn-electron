@@ -14,6 +14,7 @@ Web 界面测试使用 Playwright 和本机 Chrome，可用 `PLAYWRIGHT_CHANNEL=
 | ChatGPT OAuth 与令牌生命周期 | `npm test --workspace @learn-electron/chatgpt-auth` |
 | 仓库级与全部工作区测试       | `npm test`                                          |
 | 依赖边界测试                 | `npm run test:boundaries`                           |
+| 后端模块单向依赖与无环检查   | `npm run check:server-modules`                      |
 | 全仓库静态检查               | `npm run check`                                     |
 | 桌面冒烟与完整集成测试       | `npm run test:desktop`                              |
 | 桌面启动与聊天链路           | `npm run test:desktop:smoke`                        |
@@ -26,14 +27,15 @@ CI 在各平台运行仓库依赖边界、连接核心、认证包、contracts�
 
 桌面和 Web 界面测试需要与当前源码匹配的构建产物，单文件运行前先执行所属工作区的 `pretest`。后端、contracts 和 Runtime 测试不依赖桌面产物。
 
-后端可按层定向运行，例如：
+后端可按被测入口或组件所属模块定向运行，例如：
 
 ```powershell
 npm run typecheck:server
 node --import tsx --test --test-concurrency=2 "apps/server/test/http/*.test.mjs"
+node --import tsx --test --test-concurrency=2 "apps/server/test/component/chat/*.test.mjs"
 ```
 
-将 `http` 换成 `component` 或 `integration` 可运行其他层；`npm run test:server` 递归执行全部后端测试并自动运行类型检查。
+`component/**/*.test.mjs` 递归执行组件测试，`integration/*.test.mjs` 执行跨模块集成测试；`npm run test:server` 递归执行全部后端测试并自动运行类型检查。
 
 桌面单文件测试示例：
 
@@ -60,7 +62,9 @@ node --test --test-concurrency=1 apps/desktop/test/integration/lifecycle.test.mj
 
 崩溃恢复测试覆盖正常恢复与恢复启动阶段的超时取消。取消回归用受控 Promise 暂停启动，验证启动结束、服务关闭、目录删除的顺序，并检查取消后不再执行后续恢复操作。监听失败回归暂停引擎关闭，验证目录锁在引擎停止前保持，之后允许服务重新启动。
 
-后端测试按被测入口组织：`component` 直接验证服务、存储和应用适配，可使用真实 SQLite 与本地 OAuth 夹具；`http` 使用真实 HTTP/SSE 连接；`integration` 覆盖跨模块、进程与生命周期。共享夹具放在 `helpers`。HTTP 测试覆盖 Host、Origin、Bearer 与预检顺序、路由方法、按需读取正文及大小边界；关闭回归读取 SSE 至正常结束，并核对中断事件。
+后端测试按被测入口组织：`component/chat` 验证会话服务与 Store，`component/models` 验证模型配置与操作生命周期，`component/chatgpt` 验证认证适配与凭据文件；组件测试可使用真实 SQLite 与本地 OAuth 夹具。`http` 使用真实 HTTP/SSE 连接；`integration` 按完整流程覆盖跨模块、进程与生命周期，不拆散账号退出、上下文恢复和目录锁交接等联动场景。共享夹具放在 `helpers`，测试文件之间不互相导入。测试可以组合多个生产模块，并为持久化与故障注入直接访问模块内部；生产代码不得依赖测试。HTTP 测试覆盖 Host、Origin、Bearer 与预检顺序、路由方法、按需读取正文及大小边界；关闭回归读取 SSE 至正常结束，并核对中断事件。
+
+模型组件测试用受控账号关闭 Promise 验证生命周期所有权：创建成功后并发及完成后的重复关闭只触发一次账号关闭，所有并发调用均等待其完成；创建失败时验证初始化被拒绝且账号仍由调用方清理。断言聚焦关闭效果、完成时机和所有权，不限定 Promise 或异常对象的引用身份。聊天组件继续验证 `ChatError` 类型与业务错误码，HTTP 测试验证所属模块错误的状态和 DTO 映射。
 
 完整边界与错误矩阵由行为所属包维护。后端保留真实存储、应用适配及跨模块覆盖，浏览器和桌面保留客户端状态与宿主集成验证；相同业务经过不同边界时仍有独立价值。同层用例按风险集中维护：连接绑定用例负责显式选择、默认值变化、重启续聊及删除后不回退；配置用例负责脱敏、旧环境凭据隔离、保存失败和生成期间的修改限制。
 
@@ -70,13 +74,15 @@ SSE 快照准备包含异步模型状态读取，回归覆盖准备期间任务�
 
 ChatGPT 测试使用本地 OAuth/Responses 服务及真正签名的 ID token，不读取用户凭证或访问真实模型。认证包覆盖 JWKS 身份校验、注册复用、权限不足、取消/超时与令牌轮换；多账户回归验证按 ID 解析凭据、失败只影响指定账户，退出一个账户时另一个仍可用。后端组件验证凭据文件、应用名称、运行时模型过滤、生成限制与错误类型转换。HTTP 集成覆盖 `PUT /model` 的完整目标、无效模型不改变原选择、真实 Pi、SSE、重启续聊和失败不回退 API Key；未选中账户的连接测试不写会话或切换目标，修改默认选择后，已绑定会话继续使用原账号令牌与原生上下文，新会话使用新选择；两个 ChatGPT 实例同时生成时，退出其中一个只取消它的任务。混合连接回归覆盖登录成功、取消、失败、超时、重启与迟到响应都保留原目标，显式选择保存失败保留原连接和有效凭据，注销非活动账户不取消其他连接任务，注销活动账户仍取消其任务；其他实例的授权过程不暂停当前实例。
 
-认证包的 [生命周期测试](../packages/chatgpt-auth/test/lifecycle.test.mjs) 使用可控内存存储和 [OAuth 夹具](../packages/chatgpt-auth/test/helpers/oauth.mjs)，不依赖 Pi 或应用实现；保存失败、关闭等待和重新创建认证服务均通过存储接口验证。后端的 [适配测试](../apps/server/test/component/chatgpt-provider.test.mjs) 使用真实凭据文件，保留现有 v2 缓存兼容性，并验证调用方取消期间两个账号并发刷新的文件重读与服务重建；注入凭据写入失败后核对原文件、重试保存和重建后的替换令牌，确认不重复刷新旧令牌。临时刷新错误保留原文件，终止性错误清除令牌并持久化重新授权状态，重建服务后状态仍一致。后端 OAuth 夹具复用认证包夹具，补充 Pi 支持的模型和 Responses 流供 HTTP、浏览器集成使用。
+认证包的 [生命周期测试](../packages/chatgpt-auth/test/lifecycle.test.mjs) 使用可控内存存储和 [OAuth 夹具](../packages/chatgpt-auth/test/helpers/oauth.mjs)，不依赖 Pi 或应用实现；保存失败、关闭等待和重新创建认证服务均通过存储接口验证。后端的 [适配测试](../apps/server/test/component/chatgpt/chatgpt-provider.test.mjs) 使用真实凭据文件，保留现有 v2 缓存兼容性，并验证调用方取消期间两个账号并发刷新的文件重读与服务重建；注入凭据写入失败后核对原文件、重试保存和重建后的替换令牌，确认不重复刷新旧令牌。临时刷新错误保留原文件，终止性错误清除令牌并持久化重新授权状态，重建服务后状态仍一致。后端 OAuth 夹具复用认证包夹具，补充 Pi 支持的模型和 Responses 流供 HTTP、浏览器集成使用。
 
 数据格式回归覆盖旧模型连接文件、旧 ChatGPT 凭据文件、无版本及旧版 SQLite 数据库，以及未来版本数据库；验证拒绝打开时不改写原文件和记录。当前格式的模型、凭据、会话绑定和原生上下文在重启后保留；演示会话不能切换到真实模型续聊。
 
 认证包的授权生命周期回归用受控 Promise 暂停退出、令牌刷新和回调监听启动：退出期间拒绝同实例重新授权，其他实例仍可申请；关闭时拒绝排队登录、关闭启动中的监听器，同时确认已开始的令牌轮换完成保存。退出中的关闭分别等待任务停止、远程撤销和凭据保存，退出失败也会释放等待。后端另保留双服务重启回归，验证关闭与目录锁交接后其他账号和新实例均保留。受控并发用例清理前等待相关异步操作结束。
 
-[依赖边界回归](../scripts/test/dependency-boundaries.test.mjs) 归属仓库级测试，在隔离目录中使用仓库的导入规则，检查认证包、连接核心、后端核心、Runtime、Web 和桌面对包子路径的限制，并验证允许的依赖不受影响。`npm run test:boundaries` 单独执行，根目录 `npm test` 在工作区测试前执行一次，CI 也显式运行；认证包测试不再重复承载这组规则。
+[依赖边界回归](../scripts/test/dependency-boundaries.test.mjs) 归属仓库级测试，在隔离目录中使用仓库的导入规则，检查认证包、连接核心、后端核心、Runtime、Web 和桌面对 SDK 与包子路径的限制。该组测试允许后端内部路径交由模块守卫处理，避免在 lint 中重复维护内部依赖方向。`npm run test:boundaries` 单独执行，根目录 `npm test` 在工作区测试前执行一次，CI 也显式运行；认证包测试不再重复承载这组规则。
+
+[后端模块边界回归](../scripts/test/server-modules.test.mjs) 同属 `test:boundaries`，检查真实 `apps/server/src`，并用隔离夹具验证允许和禁止的依赖、公开入口、类型导入、重新导出、动态导入与路径别名。循环检查同时覆盖模块聚合后成环但文件图无环的情况，以及模块内部的类型环、动态导入环。依赖方向以 [整体架构](architecture.md#模块与依赖) 为准；`npm run check:server-modules` 执行源码检查，`npm run check` 也包含它。入口文件、模块目录或公开 API 变化时同步维护规则与相应夹具，不通过排除生产文件或忽略类型依赖放行。
 
 直接选择回归覆盖同供应商多实例、显式选择、默认值改变、重启和目标实例移除：重启后新会话仍采用保存的默认值，已绑定会话保留原目标；删除非默认实例时其他默认模型仍可用，但失效绑定不回退；删除默认实例时清空默认值和对应凭据。端点删除分别覆盖无其他实例和仍有其他实例两种情况；后者在重启后仍不自动选择备用实例，失效会话不转发请求，保留实例的已绑定会话仍可使用原凭据与原生上下文续聊。
 

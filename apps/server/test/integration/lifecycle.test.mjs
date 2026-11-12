@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { setImmediate, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
 import { startServer } from '../../src/server.ts'
-import { acquireDataDirectory } from '../../src/ownership.ts'
+import { acquireDataDirectory } from '../../src/shared/index.ts'
 import {
   TOKEN,
   client,

@@ -24,10 +24,12 @@ import type {
   ProvidersState,
   SaveProviderRequest,
 } from '@learn-electron/contracts/models'
-import { ApplicationError } from './errors.ts'
-import { ProtectedFile } from './protected-file.ts'
+import { ApplicationError, ProtectedFile } from '../shared/index.ts'
 
-/** Account-backed models are supplied by the application, independent of their auth implementation. */
+/**
+ * Account-backed models are supplied by the application, independent of their auth implementation.
+ * A successful ModelService.create() transfers shutdown ownership to that service.
+ */
 export interface ModelAccounts {
   view(): Omit<ProvidersState, 'defaultSelection'>
   describe(id: string): { provider: string; authMode: 'chatgpt' } | undefined
@@ -94,6 +96,10 @@ export class ModelService implements CredentialResolver {
     private readonly isBusy: (instanceId: string) => boolean,
   ) {}
 
+  /**
+   * On success, this service owns accounts.close(); other holders only borrow accounts.
+   * On failure, ownership stays with the caller, which must close accounts itself.
+   */
   static async create(
     dataDir: string,
     accounts: ModelAccounts,

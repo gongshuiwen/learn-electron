@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-test('dependency boundaries cover package subpaths without blocking allowed imports', async (t) => {
+test('workspace boundaries cover package subpaths without duplicating backend module rules', async (t) => {
   const root = fileURLToPath(new URL('../../', import.meta.url))
   const directory = await mkdtemp(join(tmpdir(), 'learn-electron-boundary-'))
   t.after(async () => {
@@ -31,6 +31,7 @@ test('dependency boundaries cover package subpaths without blocking allowed impo
       },
     )
   }
+  // Backend-local imports are checked by check-server-modules, not these package/SDK rules.
   const cases = [
     {
       path: 'packages/chatgpt-auth/src/probe.ts',
@@ -46,14 +47,27 @@ test('dependency boundaries cover package subpaths without blocking allowed impo
       ],
     },
     {
-      path: 'apps/server/src/model-service.ts',
-      allowed: ['@learn-electron/model-connections', '@learn-electron/contracts/models'],
+      path: 'apps/server/src/models/model-service.ts',
+      allowed: [
+        '@learn-electron/model-connections',
+        '@learn-electron/contracts/models',
+        '../chatgpt/index.ts',
+      ],
       blocked: [
         '@earendil-works/pi-ai/providers/openai',
         '@learn-electron/chatgpt-auth',
         '@learn-electron/chatgpt-auth/internal',
-        './chatgpt/provider.ts',
       ],
+    },
+    {
+      path: 'apps/server/src/chat/probe.ts',
+      allowed: [
+        '@learn-electron/agent-runtime',
+        '../models/index.ts',
+        '../shared/index.ts',
+        '../chatgpt/provider.ts',
+      ],
+      blocked: ['@learn-electron/chatgpt-auth/internal'],
     },
     {
       path: 'packages/agent-runtime/src/probe.ts',

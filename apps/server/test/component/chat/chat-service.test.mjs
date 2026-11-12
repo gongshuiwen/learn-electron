@@ -5,9 +5,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
-import { ChatService } from '../../src/chat-service.ts'
-import { ChatError } from '../../src/errors.ts'
-import { Store } from '../../src/store.ts'
+import { ChatService, Store, ChatError } from '../../../src/chat/index.ts'
 
 function deferred() {
   let resolve

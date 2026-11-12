@@ -6,9 +6,9 @@ import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promi
 import test from 'node:test'
 import { ChatGPTOAuth, PLAN_SCOPE } from '@learn-electron/chatgpt-auth'
 import { startServer } from '../../src/server.ts'
-import { ChatService } from '../../src/chat-service.ts'
+import { ChatService } from '../../src/chat/index.ts'
 import { ConnectionStorage } from '../../src/chatgpt/storage.ts'
-import { ProtectedFile } from '../../src/protected-file.ts'
+import { ProtectedFile } from '../../src/shared/index.ts'
 import { oauthFixture } from '../helpers/chatgpt.mjs'
 
 test(

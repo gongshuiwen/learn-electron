@@ -3,16 +3,11 @@ import { METHODS, type IncomingMessage } from 'node:http'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { API_PREFIX, type ApiError } from '@learn-electron/contracts'
 import { ModelError, type AgentEngine } from '@learn-electron/agent-runtime'
-import type { ChatService } from '../chat-service.ts'
-import type { ChatGPTProvider } from '../chatgpt/provider.ts'
-import {
-  ApplicationError,
-  ChatError,
-  HttpError,
-  type ApplicationErrorCode,
-  type ChatErrorCode,
-} from '../errors.ts'
-import type { ModelService } from '../model-service.ts'
+import { ChatError, type ChatErrorCode, type ChatService } from '../chat/index.ts'
+import type { ChatGPTProvider } from '../chatgpt/index.ts'
+import { ApplicationError, type ApplicationErrorCode } from '../shared/index.ts'
+import type { ModelService } from '../models/index.ts'
+import { HttpError } from './errors.ts'
 import { registerChatRoutes } from './chat-routes.ts'
 import { registerModelRoutes } from './model-routes.ts'
 

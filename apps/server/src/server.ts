@@ -2,13 +2,11 @@ import { mkdir } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { createPiEngine, getOpenAIModels, type AgentEngine } from '@learn-electron/agent-runtime'
 import type { ChatGPTOAuth } from '@learn-electron/chatgpt-auth'
-import { ChatGPTProvider } from './chatgpt/provider.ts'
-import { ModelService } from './model-service.ts'
-import { ChatService } from './chat-service.ts'
+import { ChatGPTProvider } from './chatgpt/index.ts'
+import { ModelService } from './models/index.ts'
+import { ChatService, Store } from './chat/index.ts'
 import { createHttpServer } from './http/index.ts'
-import { acquireDataDirectory } from './ownership.ts'
-import { Store } from './store.ts'
-import { waitWithin } from './wait-within.ts'
+import { acquireDataDirectory, waitWithin } from './shared/index.ts'
 
 async function closeEngineAndRelease(
   engine: AgentEngine,
@@ -55,6 +53,7 @@ export async function startServer(
         isUpdating: (id) => models?.isChanging(id) ?? false,
         oauth: options.chatgptOAuth,
       })
+      // Successful creation transfers ChatGPT shutdown ownership to ModelService.
       models = await ModelService.create(directory, chatgpt, (id) => isChatBusy(id))
     }
     engine =

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { isRecord } from '@learn-electron/contracts'
 import { parseChatGPTModels } from '@learn-electron/contracts/chatgpt'
 import type { SavedConnections, Tokens } from '@learn-electron/chatgpt-auth'
-import { ProtectedFile } from '../protected-file.ts'
+import { ProtectedFile } from '../shared/index.ts'
 
 function validTokens(value: unknown): value is Tokens {
   return (

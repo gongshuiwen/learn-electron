@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { setImmediate, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
-import { ModelService } from '../../src/model-service.ts'
-import { ProtectedFile } from '../../src/protected-file.ts'
+import { ModelService } from '../../../src/models/index.ts'
+import { ProtectedFile } from '../../../src/shared/index.ts'
 
 const config = {
   name: 'Endpoint',
@@ -15,11 +15,12 @@ const config = {
   models: [{ id: 'model' }],
 }
 
-async function fixture() {
+async function fixture(accountOverrides = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'learn-electron-model-service-'))
   const accounts = {
     view: () => ({ instances: [], chatgpt: { enabled: true } }),
     close: async () => {},
+    ...accountOverrides,
   }
   const service = await ModelService.create(dataDir, accounts, () => false)
   return {
@@ -35,6 +36,64 @@ async function fixture() {
     },
   }
 }
+
+test('successful model service creation owns account shutdown and drains it exactly once', async (t) => {
+  const finish = Promise.withResolvers()
+  let closeCalls = 0
+  const f = await fixture({
+    close() {
+      closeCalls++
+      return finish.promise
+    },
+  })
+  t.after(async () => {
+    finish.resolve()
+    await f.dispose()
+  })
+
+  let closed = 0
+  const closing = Promise.all(
+    [f.service.close(), f.service.close()].map((operation) =>
+      operation.then(() => {
+        closed++
+      }),
+    ),
+  )
+  await setImmediate()
+  assert.equal(closeCalls, 1)
+  assert.equal(closed, 0, 'every caller must wait for account shutdown')
+
+  finish.resolve()
+  await closing
+  await f.service.close()
+  assert.equal(closeCalls, 1)
+})
+
+test('failed model service creation leaves account shutdown ownership with the caller', async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'learn-electron-model-service-'))
+  let closeCalls = 0
+  const accounts = {
+    view() {
+      throw new Error('Account state unavailable')
+    },
+    async close() {
+      closeCalls++
+    },
+  }
+  t.after(async () => {
+    try {
+      await accounts.close()
+      assert.equal(closeCalls, 1)
+    } finally {
+      assert.equal(dirname(resolve(dataDir)), resolve(tmpdir()))
+      assert.ok(basename(dataDir).startsWith('learn-electron-model-service-'))
+      await rm(dataDir, { recursive: true, force: true, maxRetries: 5 })
+    }
+  })
+
+  await assert.rejects(ModelService.create(dataDir, accounts, () => false))
+  assert.equal(closeCalls, 0, 'failed initialization must not take account ownership')
+})
 
 test(
   'a connection probe isolates other instances and remains tracked during shutdown',

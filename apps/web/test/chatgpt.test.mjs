@@ -8,7 +8,7 @@ import test from 'node:test'
 import { chromium } from 'playwright-core'
 import { preview } from 'vite'
 import { startServer } from '../../server/src/server.ts'
-import { ProtectedFile } from '../../server/src/protected-file.ts'
+import { ProtectedFile } from '../../server/src/shared/index.ts'
 import { oauthFixture } from '../../server/test/helpers/chatgpt.mjs'
 
 test(

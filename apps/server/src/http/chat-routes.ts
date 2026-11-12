@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { parseStartRun, parseTitle } from '@learn-electron/contracts'
 import { parseCreateConversation, parseModelRef } from '@learn-electron/contracts/models'
-import type { ChatService } from '../chat-service.ts'
-import { HttpError } from '../errors.ts'
-import type { ModelService } from '../model-service.ts'
+import type { ChatService } from '../chat/index.ts'
+import { HttpError } from './errors.ts'
+import type { ModelService } from '../models/index.ts'
 import { streamRun } from './events.ts'
 import { ID_PARAM, methodNotAllowed, parse, readJson, type IdParams } from './shared.ts'
 
