@@ -1,0 +1,9 @@
+ApiError:
+  description: |
+    JSON 错误。400 参数或 JSON 无效；401 Bearer 无效；403 Host/Origin 拒绝；
+    404 资源或路径不存在；405 方法不支持；409 状态冲突或引擎禁用；
+    413 正文过大；415 媒体类型不支持；500 内部错误；503 未配置、存储不可用或停止中。
+    已开始的 SSE 错误关闭连接，不追加 JSON；模型执行失败通过任务状态报告。
+  content:
+    application/json:
+      schema: { $ref: 'schemas/common.yaml#/ApiError' }

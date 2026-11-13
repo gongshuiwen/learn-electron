@@ -1,0 +1,126 @@
+conversations:
+  get:
+    operationId: listConversations
+    summary: 按更新时间倒序读取会话
+    responses:
+      '200':
+        description: 会话列表
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chat.yaml#/Conversations' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+  post:
+    operationId: createConversation
+    summary: 创建空会话，可显式指定模型选择
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/chat.yaml#/CreateConversationRequest' }
+    responses:
+      '201':
+        description: 新会话
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chat.yaml#/Conversation' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+conversation:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  get:
+    operationId: getConversation
+    summary: 读取完整会话快照
+    responses:
+      '200':
+        description: 会话快照
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chat.yaml#/ConversationSnapshot' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+  patch:
+    operationId: renameConversation
+    summary: 重命名会话
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/chat.yaml#/RenameConversationRequest' }
+    responses:
+      '200':
+        description: 已更新会话
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chat.yaml#/Conversation' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+  delete:
+    operationId: deleteConversation
+    summary: 删除会话，活动任务期间返回 409
+    responses:
+      '204': { description: 已删除，无正文 }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+conversationModel:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  put:
+    operationId: selectConversationModel
+    summary: 更新空会话的模型选择，不修改默认选择
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/models.yaml#/ModelRef' }
+    responses:
+      '200':
+        description: 已更新快照
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chat.yaml#/ConversationSnapshot' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+conversationRuns:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  post:
+    operationId: startRun
+    summary: 幂等提交消息，真实引擎要求 expectedTarget
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/chat.yaml#/StartRunRequest' }
+    responses:
+      '202':
+        description: 已接收或幂等返回原任务；任务可能已结束
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chat.yaml#/Run' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+runEvents:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  get:
+    operationId: streamRunEvents
+    summary: 订阅任务；首条为权威快照，不重放 Last-Event-ID
+    responses:
+      '200':
+        description: |
+          SSE 帧包含 id（sequence）和 data（RunEvent JSON），不发送 event 字段。
+          每 15 秒发送 heartbeat 注释；终态 run.updated 后关闭连接。
+          x-event-schema 描述单条 data JSON，schema 描述整个 SSE 文本流。
+        content:
+          text/event-stream:
+            schema: { type: string }
+            x-event-schema: { $ref: '../components/schemas/chat.yaml#/RunEvent' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+cancelRun:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  post:
+    operationId: cancelRun
+    summary: 幂等请求取消，cancelling 不表示已结束
+    responses:
+      '200':
+        description: 当前任务状态
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chat.yaml#/Run' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }

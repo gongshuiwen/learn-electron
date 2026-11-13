@@ -1,4 +1,4 @@
-import { isRecord } from '@learn-electron/contracts'
+import { isObject } from '@learn-electron/model-connections'
 import { createServerProcess } from './lifecycle.ts'
 
 if (!process.send) throw new Error('桌面后端需要 IPC 通道')
@@ -13,7 +13,7 @@ const service = createServerProcess(
 )
 
 process.on('message', (value: unknown) => {
-  if (!isRecord(value)) return
+  if (!isObject(value)) return
   if (value.type === 'shutdown') {
     void service.shutdown()
   } else if (

@@ -12,6 +12,7 @@ import {
   type ModelTarget,
 } from '@learn-electron/model-connections'
 import type { ProvidersState } from '@learn-electron/contracts/models'
+import type { ChatGPTLogin, LogoutResult } from '@learn-electron/contracts/chatgpt'
 import { ApplicationError } from '../shared/index.ts'
 import type { ModelAccounts } from '../models/index.ts'
 import { ConnectionStorage } from './storage.ts'
@@ -100,7 +101,9 @@ export class ChatGPTProvider implements ModelAccounts {
       })),
       chatgpt: {
         enabled: true,
-        ...(status.pendingLogin ? { pendingLogin: status.pendingLogin } : {}),
+        ...(status.pendingLogin?.status === 'pending'
+          ? { pendingLogin: { ...status.pendingLogin, status: status.pendingLogin.status } }
+          : {}),
       },
     }
   }
@@ -119,17 +122,17 @@ export class ChatGPTProvider implements ModelAccounts {
     this.available(id)
     return await attemptAsync(() => this.auth.removeProfile(id, beforeRemove))
   }
-  async beginLogin(id: string, timeoutMs?: number) {
+  async beginLogin(id: string, timeoutMs?: number): Promise<ChatGPTLogin> {
     this.available(id)
     return await attemptAsync(() => this.auth.beginLogin(id, timeoutMs))
   }
-  login(id: string) {
+  login(id: string): ChatGPTLogin {
     return attempt(() => this.auth.login(id))
   }
   cancelLogin(id: string): void {
     attempt(() => this.auth.cancelLogin(id))
   }
-  async logout(id: string, stop: () => Promise<void>) {
+  async logout(id: string, stop: () => Promise<void>): Promise<LogoutResult> {
     if (this.isUpdating(id)) throw new ApplicationError('connection_busy', '模型连接正在更新')
     return await attemptAsync(() => this.auth.logout(id, stop))
   }

@@ -101,9 +101,9 @@ test('HTTP responses use the decoder and reject malformed successful bodies', as
     new Response(null, { status: 204 }),
   ]
   t.mock.method(globalThis, 'fetch', async () => responses.shift())
-  assert.deepEqual(await request('/runs/run-1', parseRun), run)
-  await assert.rejects(request('/runs/run-1', parseRun), ProtocolError)
-  await assert.rejects(request('/runs/run-1', parseRun), ProtocolError)
+  assert.deepEqual(await request('/runs/run-1/cancel', parseRun, { method: 'POST' }), run)
+  await assert.rejects(request('/runs/run-1/cancel', parseRun, { method: 'POST' }), ProtocolError)
+  await assert.rejects(request('/runs/run-1/cancel', parseRun, { method: 'POST' }), ProtocolError)
   assert.equal(
     await request('/conversations/conversation-1', undefined, { method: 'DELETE' }),
     undefined,
@@ -115,6 +115,8 @@ test('HTTP and SSE preserve structured errors and tolerate proxy error pages', a
     Response.json({ error: { code: 'shutting_down', message: '服务正在停止' } }, { status: 503 }),
     Response.json({ error: { code: 'unauthorized', message: '需要有效令牌' } }, { status: 401 }),
     new Response('<html>Bad Gateway</html>', { status: 502 }),
+    Response.json({ error: { code: 42, message: 'untrusted shape' } }, { status: 502 }),
+    Response.json({ error: { message: 'incomplete envelope' } }, { status: 502 }),
   ]
   t.mock.method(globalThis, 'fetch', async () => responses.shift())
   await assert.rejects(request('/meta', parseRun), (error) => {
@@ -141,4 +143,10 @@ test('HTTP and SSE preserve structured errors and tolerate proxy error pages', a
     assert.ok(error.message && !error.message.includes('<html>'))
     return true
   })
+  for (let i = 0; i < 2; i++)
+    await assert.rejects(request('/meta', parseRun), (error) => {
+      assert.equal(error.code, undefined)
+      assert.equal(error.message, '请求失败（502）')
+      return true
+    })
 })

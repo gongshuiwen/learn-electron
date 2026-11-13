@@ -91,6 +91,7 @@ for (const operation of ['polling', 'cancelling']) {
         {
           id: 'old-account',
           kind: 'chatgpt',
+          vendor: 'openai',
           name: 'Old',
           status: 'authorizing',
           planUsage: false,
@@ -127,6 +128,7 @@ for (const operation of ['polling', 'cancelling']) {
               accounts.push({
                 id: 'new-account',
                 kind: 'chatgpt',
+                vendor: 'openai',
                 name: 'New',
                 status: 'signed_out',
                 planUsage: false,
@@ -246,6 +248,7 @@ test(
             accounts.push({
               id: 'account-' + (accounts.length + 1),
               kind: 'chatgpt',
+              vendor: 'openai',
               name: '未完成的连接 ' + (accounts.length + 1),
               status: 'signed_out',
               planUsage: false,
@@ -309,6 +312,7 @@ test(
     const profiles = ['account-a', 'account-b'].map((id) => ({
       id,
       kind: 'chatgpt',
+      vendor: 'openai',
       name: id,
       status: 'connected',
       planUsage: true,
@@ -316,6 +320,7 @@ test(
     const keyConnection = {
       id: 'api-connection',
       kind: 'endpoint',
+      vendor: 'custom',
       revision: 1,
       name: 'API gateway',
       protocol: 'openai-chat',
@@ -361,7 +366,15 @@ test(
           return api.handleModelState()
         }
         const models = /^\/model-providers\/(account-[ab])\/models$/.exec(path)
-        if (models) return json([{ id: 'model-' + models[1], name: 'Model ' + models[1] }])
+        if (models)
+          return json([
+            {
+              id: 'model-' + models[1],
+              name: 'Model ' + models[1],
+              contextWindow: 32768,
+              maxOutputTokens: 4096,
+            },
+          ])
         if (path === '/model' && request.method() === 'PUT') {
           defaultSelection = request.postDataJSON()
           assert.equal(
@@ -452,6 +465,7 @@ test(
     ].map((profile) => ({
       ...profile,
       kind: 'chatgpt',
+      vendor: 'openai',
       name: profile.id,
       planUsage: true,
     }))
@@ -489,7 +503,9 @@ test(
         if (
           ['/model-providers/account-a/models', '/model-providers/account-c/models'].includes(path)
         )
-          return json([{ id: 'chat-model', name: 'Chat model' }])
+          return json([
+            { id: 'chat-model', name: 'Chat model', contextWindow: 32768, maxOutputTokens: 4096 },
+          ])
         if (path === '/model-auth-attempts/pending-login') {
           polls++
           if (!completed) return json(pendingLogin)

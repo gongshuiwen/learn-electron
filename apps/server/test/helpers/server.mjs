@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { startServer } from '../../src/server.ts'
+import { schemaValidators } from '@learn-electron/contracts/validation'
+import { assertApiResponse } from './contracts.mjs'
 
 export const TOKEN = 'integration-test-secret-token'
 
@@ -56,7 +58,7 @@ export async function fixture(t, options = {}) {
 export function client(url) {
   return async (path, options = {}) => {
     const { body, headers, ...rest } = options
-    return fetch(`${url}/api/v1${path}`, {
+    const response = await fetch(`${url}/api/v1${path}`, {
       ...rest,
       headers: {
         Authorization: `Bearer ${TOKEN}`,
@@ -68,6 +70,7 @@ export function client(url) {
         : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
       signal: options.signal ?? AbortSignal.timeout(5000),
     })
+    return assertApiResponse(response, path, options.method ?? 'GET')
   }
 }
 
@@ -101,6 +104,11 @@ export async function* events(response) {
       const data = lines.find((line) => line.startsWith('data: '))
       if (data) {
         const event = JSON.parse(data.slice(6))
+        assert.equal(
+          schemaValidators.RunEvent(event),
+          true,
+          'SSE data must satisfy OpenAPI RunEvent',
+        )
         assert.equal(
           lines.find((line) => line.startsWith('id: ')),
           `id: ${event.sequence}`,

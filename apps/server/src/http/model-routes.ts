@@ -1,17 +1,18 @@
 import type { FastifyInstance } from 'fastify'
 import type { AgentEngine } from '@learn-electron/agent-runtime'
+import { httpOperations as operations } from '@learn-electron/contracts/http'
 import {
   modelAdapters,
+  parseCreateProvider,
   parseModelRef,
   parseProviderTest,
   parseSaveProvider,
 } from '@learn-electron/contracts/models'
-import { isObject } from '@learn-electron/model-connections'
 import type { ChatService } from '../chat/index.ts'
 import type { ChatGPTProvider } from '../chatgpt/index.ts'
 import { HttpError } from './errors.ts'
 import type { ModelService } from '../models/index.ts'
-import { ID_PARAM, methodNotAllowed, parse, readJson, type IdParams } from './shared.ts'
+import { methodNotAllowed, parse, readJson, type IdParams } from './shared.ts'
 
 export function registerModelRoutes(
   app: FastifyInstance,
@@ -35,85 +36,104 @@ export function registerModelRoutes(
     return chatgpt
   }
 
-  app.get('/model-adapters', () => modelAdapters)
+  app.route({
+    method: operations.listModelAdapters.method,
+    url: operations.listModelAdapters.url,
+    handler: () => modelAdapters,
+  })
 
-  app.all('/model-providers', async (request, reply) => {
-    if (!models && request.method === 'GET')
+  app.all(operations.getProviders.url, async (request, reply) => {
+    if (!models && request.method === operations.getProviders.method)
       return { defaultSelection: null, instances: [], chatgpt: { enabled: false } }
     const service = requireModels()
-    if (request.method === 'GET') return service.status()
-    if (request.method === 'POST') {
-      const body = await readJson(request.raw)
+    if (request.method === operations.getProviders.method) return service.status()
+    if (request.method === operations.createProvider.method) {
+      const body = parse(parseCreateProvider, await readJson(request.raw))
       return reply
-        .code(201)
-        .send(
-          isObject(body) && body.kind === 'chatgpt'
-            ? await service.createAccount()
-            : await service.save(parse(parseSaveProvider, body)),
-        )
+        .code(operations.createProvider.successStatus)
+        .send('kind' in body ? await service.createAccount() : await service.save(body))
     }
     return methodNotAllowed()
   })
 
-  app.all<IdParams>(`/model-providers/${ID_PARAM}`, async (request) => {
+  app.all<IdParams<'updateProvider'>>(operations.updateProvider.url, async (request) => {
     const service = requireModels()
-    if (request.method === 'PATCH')
+    if (request.method === operations.updateProvider.method)
       return service.save(parse(parseSaveProvider, await readJson(request.raw)), request.params.id)
-    if (request.method === 'DELETE') return service.remove(request.params.id)
+    if (request.method === operations.deleteProvider.method)
+      return service.remove(request.params.id)
     return methodNotAllowed()
   })
 
-  app.all<IdParams>(`/model-providers/${ID_PARAM}/models`, async (request) => {
+  app.all<IdParams<'listProviderModels'>>(operations.listProviderModels.url, async (request) => {
     const service = requireModels()
-    if (request.method === 'GET') return service.models(request.params.id)
+    if (request.method === operations.listProviderModels.method)
+      return service.models(request.params.id)
     return methodNotAllowed()
   })
 
-  app.all<IdParams>(`/model-providers/${ID_PARAM}/models/refresh`, async (request) => {
-    const service = requireModels()
-    if (request.method === 'POST') return service.refreshModels(request.params.id)
-    return methodNotAllowed()
-  })
+  app.all<IdParams<'refreshProviderModels'>>(
+    operations.refreshProviderModels.url,
+    async (request) => {
+      const service = requireModels()
+      if (request.method === operations.refreshProviderModels.method)
+        return service.refreshModels(request.params.id)
+      return methodNotAllowed()
+    },
+  )
 
-  app.all<IdParams>(`/model-providers/${ID_PARAM}/test`, async (request, reply) => {
+  app.all<IdParams<'testProvider'>>(operations.testProvider.url, async (request, reply) => {
     const service = requireModels()
-    if (request.method !== 'POST') return methodNotAllowed()
+    if (request.method !== operations.testProvider.method) return methodNotAllowed()
     const { modelId } = parse(parseProviderTest, await readJson(request.raw))
     const execute = engine.testConnection?.bind(engine)
     if (!execute) throw new HttpError(409, 'engine_disabled', '当前引擎不支持连接测试')
     await service.test(request.params.id, modelId, execute)
-    return reply.code(204).send()
+    return reply.code(operations.testProvider.successStatus).send()
   })
 
-  app.all<IdParams>(`/model-providers/${ID_PARAM}/auth/attempts`, async (request, reply) => {
-    const provider = requireChatGPT(request.params.id)
-    if (request.method === 'POST')
-      return reply.code(201).send(await provider.beginLogin(request.params.id))
-    return methodNotAllowed()
-  })
+  app.all<IdParams<'beginProviderLogin'>>(
+    operations.beginProviderLogin.url,
+    async (request, reply) => {
+      const provider = requireChatGPT(request.params.id)
+      if (request.method === operations.beginProviderLogin.method)
+        return reply
+          .code(operations.beginProviderLogin.successStatus)
+          .send(await provider.beginLogin(request.params.id))
+      return methodNotAllowed()
+    },
+  )
 
-  app.all<IdParams>(`/model-providers/${ID_PARAM}/auth/logout`, async (request) => {
+  app.all<IdParams<'logoutProvider'>>(operations.logoutProvider.url, async (request) => {
     const provider = requireChatGPT(request.params.id)
-    if (request.method === 'POST')
+    if (request.method === operations.logoutProvider.method)
       return provider.logout(request.params.id, () => chat.cancelAll(request.params.id))
     return methodNotAllowed()
   })
 
-  app.all<IdParams>(`/model-auth-attempts/${ID_PARAM}`, (request) => {
+  app.all<IdParams<'getLoginAttempt'>>(operations.getLoginAttempt.url, (request) => {
     if (!chatgpt) throw new HttpError(409, 'engine_disabled', '演示模式不支持登录')
-    if (request.method === 'GET') return chatgpt.login(request.params.id)
+    if (request.method === operations.getLoginAttempt.method)
+      return chatgpt.login(request.params.id)
     return methodNotAllowed()
   })
 
-  app.all<IdParams>(`/model-auth-attempts/${ID_PARAM}/cancel`, async (request, reply) => {
-    if (!chatgpt) throw new HttpError(409, 'engine_disabled', '演示模式不支持登录')
-    if (request.method !== 'POST') return methodNotAllowed()
-    chatgpt.cancelLogin(request.params.id)
-    return reply.code(204).send()
-  })
+  app.all<IdParams<'cancelLoginAttempt'>>(
+    operations.cancelLoginAttempt.url,
+    async (request, reply) => {
+      if (!chatgpt) throw new HttpError(409, 'engine_disabled', '演示模式不支持登录')
+      if (request.method !== operations.cancelLoginAttempt.method) return methodNotAllowed()
+      chatgpt.cancelLogin(request.params.id)
+      return reply.code(operations.cancelLoginAttempt.successStatus).send()
+    },
+  )
 
-  app.put('/model', async (request) => {
-    if (!models) throw new HttpError(409, 'engine_disabled', '当前引擎不支持模型选择')
-    return models.select(parse(parseModelRef, await readJson(request.raw)))
+  app.route({
+    method: operations.selectDefaultModel.method,
+    url: operations.selectDefaultModel.url,
+    handler: async (request) => {
+      if (!models) throw new HttpError(409, 'engine_disabled', '当前引擎不支持模型选择')
+      return models.select(parse(parseModelRef, await readJson(request.raw)))
+    },
   })
 }

@@ -15,6 +15,8 @@ Web 界面测试使用 Playwright 和本机 Chrome，可用 `PLAYWRIGHT_CHANNEL=
 | 仓库级与全部工作区测试       | `npm test`                                          |
 | 依赖边界测试                 | `npm run test:boundaries`                           |
 | 后端模块单向依赖与无环检查   | `npm run check:server-modules`                      |
+| OpenAPI 规范检查             | `npm run lint:api`                                  |
+| OpenAPI 规范及生成产物一致性 | `npm run check:contracts`                           |
 | 全仓库静态检查               | `npm run check`                                     |
 | 桌面冒烟与完整集成测试       | `npm run test:desktop`                              |
 | 桌面启动与聊天链路           | `npm run test:desktop:smoke`                        |
@@ -56,7 +58,7 @@ node --test --test-concurrency=1 apps/desktop/test/integration/lifecycle.test.mj
 | 后端      | HTTP/SSE 与 SQLite                               |
 | 连接核心  | 纯配置与选择校验、模型引用、协议兼容及凭据头边界 |
 | 认证包    | OAuth/OIDC、账号隔离、令牌轮换、撤销与关闭顺序   |
-| contracts | 协议校验                                         |
+| contracts | OpenAPI 生成、结构校验、规范化及跨字段协议约束   |
 | Pi 适配   | 离线验证真实 session 与上下文持久化              |
 | 桌面集成  | 真实本地后端与 mock 引擎的集成链路               |
 
@@ -95,6 +97,8 @@ Pi 代理回归使用独立 Node 进程和真实本地 HTTP 代理，验证 SDK 
 自动化测试不覆盖真实提供商网络连接；页面恢复测试不验证操作系统原生崩溃事件投递。
 
 真实账户验收直接在界面连接 ChatGPT：在系统浏览器授权计划使用，选择账户和模型并点击“使用此模型”，连续发送两轮消息，重启应用后续聊，查看 ChatGPT 用量设置，再验证退出和重新授权。检查真实上游成功前，不将模拟授权测试视为订阅可用性的证明。网络、账户/工作区政策及上游权限失败应记录实际状态，不关闭 TLS、绕过站点验证或改用 API Key。
+
+contracts 的 `pretest` 运行 Spectral 并检查 OpenAPI 与生成产物是否一致，不修改契约或生成物。生成回归在隔离副本中修改外部路径和 Schema，验证引用解析、类型、校验器、路由和输入约束随之改变，并拒绝无法解析的引用，防止旧的结构限制残留；浏览器打包回归确保 HTTP 元数据不加载校验器。契约测试保留 UTF-16 长度与 trim 顺序、必填字段、常量、错误和请求头结构、嵌套模型引用规范化、凭据脱敏、模型关系与唯一性、SSE 跨字段一致性的验证。HTTP/SSE、供应商及 OAuth 集成夹具直接校验实际响应和事件，保留 GET 只读、不调用上游及状态错误优先级的回归。
 
 ## 交付验证
 

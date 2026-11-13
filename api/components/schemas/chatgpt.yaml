@@ -1,0 +1,56 @@
+CreateChatGPTProviderRequest:
+  type: object
+  required: [kind]
+  properties:
+    kind: { type: string, const: chatgpt }
+ChatGPTProfile:
+  type: object
+  required: [id, name, status, planUsage]
+  properties:
+    id: { $ref: 'common.yaml#/Identifier' }
+    name: { type: string, pattern: '\S' }
+    status:
+      type: string
+      enum: [signed_out, connected, reauth_required, authorizing, busy]
+    planUsage: { type: boolean }
+ChatGPTInstanceView:
+  allOf:
+    - { $ref: '#/ChatGPTProfile' }
+    - type: object
+      required: [kind, vendor]
+      properties:
+        kind: { type: string, const: chatgpt }
+        vendor: { type: string, const: openai }
+ChatGPTModel:
+  type: object
+  required: [id, name]
+  properties:
+    id: { type: string }
+    name: { type: string }
+ChatGPTModels:
+  type: array
+  items: { $ref: '#/ChatGPTModel' }
+ChatGPTLogin:
+  allOf:
+    - type: object
+      required: [id, authorizationUrl, expiresAt]
+      properties:
+        id: { $ref: 'common.yaml#/Identifier' }
+        authorizationUrl: { type: string }
+        expiresAt: { type: string }
+        error: { type: string }
+    - oneOf:
+        - type: object
+          required: [status, instanceId]
+          properties:
+            status: { type: string, const: completed }
+            instanceId: { $ref: 'common.yaml#/Identifier' }
+        - type: object
+          required: [status]
+          properties:
+            status: { type: string, enum: [pending, cancelled, expired, failed] }
+LogoutResult:
+  type: object
+  required: [revoked]
+  properties:
+    revoked: { type: boolean }

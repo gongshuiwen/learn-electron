@@ -1,6 +1,6 @@
 # 前后端协议
 
-本文记录当前 `/api/v1` 的交互语义。字段、联合类型和参数校验以 [contracts](../packages/contracts/src/index.ts) 为准；HTTP 行为见 [HTTP 层](../apps/server/src/http/index.ts)，任务语义见 [ChatService](../apps/server/src/chat/chat-service.ts)。
+本文记录当前 `/api/v1` 的交互语义。路径、方法、请求、响应、鉴权和数据结构以 [OpenAPI](../api/openapi.yaml) 为源头；[contracts](../packages/contracts/src/index.ts) 使用生成的共享类型与结构校验，并保留规范化和跨字段语义检查。HTTP 行为见 [HTTP 层](../apps/server/src/http/index.ts)，任务语义见 [ChatService](../apps/server/src/chat/chat-service.ts)。
 
 ## 通用约定
 
@@ -18,36 +18,11 @@
 
 ## HTTP 接口
 
-下表路径省略 `/api/v1`，返回类型见 contracts 中的同名定义。
-
-| 方法   | 路径                       | 正文                             | 成功响应                   |
-| ------ | -------------------------- | -------------------------------- | -------------------------- |
-| GET    | `/meta`                    | 无                               | `200 ServiceMeta`          |
-| GET    | `/conversations`           | 无                               | `200 Conversation[]`       |
-| POST   | `/conversations`           | 可选 `{ "selection": ModelRef }` | `201 Conversation`         |
-| GET    | `/conversations/:id`       | 无                               | `200 ConversationSnapshot` |
-| PUT    | `/conversations/:id/model` | `ModelRef`                       | `200 ConversationSnapshot` |
-| PATCH  | `/conversations/:id`       | `{ "title": "标题" }`            | `200 Conversation`         |
-| DELETE | `/conversations/:id`       | 无                               | `204`                      |
-| POST   | `/conversations/:id/runs`  | `StartRunRequest`                | `202 Run`                  |
-| GET    | `/runs/:id/events`         | 无                               | `200 text/event-stream`    |
-| POST   | `/runs/:id/cancel`         | 无需正文                         | `200 Run`                  |
+完整接口定义见 [OpenAPI 的 paths 和 components](../api/openapi.yaml)，以下只说明交互语义。路径省略 `/api/v1`。
 
 ### 模型供应商与默认选择
 
-类型与校验见 [contracts/models](../packages/contracts/src/models.ts)，纯领域模型见 [model-connections](../packages/model-connections/src/index.ts)。供应商品牌 `vendor`、实例 `id` 与接口协议相互独立；同品牌、同地址可以有多个实例，各自保存凭据和模型目录。
-
-| 方法   | 路径                                  | 正文                                             | 成功响应                 |
-| ------ | ------------------------------------- | ------------------------------------------------ | ------------------------ |
-| GET    | `/model-adapters`                     | 无                                               | `200 ModelAdapterView[]` |
-| GET    | `/model-providers`                    | 无                                               | `200 ProvidersState`     |
-| POST   | `/model-providers`                    | `SaveProviderRequest` 或 `{ "kind": "chatgpt" }` | `201 ProvidersState`     |
-| PATCH  | `/model-providers/:id`                | 端点完整配置与可选凭据更新                       | `200 ProvidersState`     |
-| DELETE | `/model-providers/:id`                | 无                                               | `200 ProvidersState`     |
-| GET    | `/model-providers/:id/models`         | 无，只读缓存                                     | `200 ModelDefinition[]`  |
-| POST   | `/model-providers/:id/models/refresh` | 无，请求上游                                     | `200 ModelDefinition[]`  |
-| POST   | `/model-providers/:id/test`           | `{ "modelId": "模型" }`                          | `204`                    |
-| PUT    | `/model`                              | `ModelRef`                                       | `200 ProvidersState`     |
+HTTP 数据结构由 OpenAPI 生成；[contracts/models](../packages/contracts/src/models.ts) 负责规范化与脱敏投影，纯领域模型见 [model-connections](../packages/model-connections/src/index.ts)。供应商品牌 `vendor`、实例 `id` 与接口协议相互独立；同品牌、同地址可以有多个实例，各自保存凭据和模型目录。
 
 `ModelRef` 直接指定供应商实例和模型：
 
@@ -69,14 +44,7 @@
 
 ### 实例授权
 
-类型与校验见 [contracts/chatgpt](../packages/contracts/src/chatgpt.ts)。先通过 `POST /model-providers { "kind": "chatgpt" }` 创建实例，再按其 ID 登录或重新授权：
-
-| 方法 | 路径                                 | 正文 | 成功响应                         |
-| ---- | ------------------------------------ | ---- | -------------------------------- |
-| POST | `/model-providers/:id/auth/attempts` | 无   | `201 ChatGPTLogin`               |
-| GET  | `/model-auth-attempts/:id`           | 无   | `200 ChatGPTLogin`               |
-| POST | `/model-auth-attempts/:id/cancel`    | 无   | `204`                            |
-| POST | `/model-providers/:id/auth/logout`   | 无   | `200 { "revoked": true或false }` |
+登录 DTO 由 OpenAPI 生成，[contracts/chatgpt](../packages/contracts/src/chatgpt.ts) 只保留公开字段投影。先通过 `POST /model-providers { "kind": "chatgpt" }` 创建实例，再按其 ID 登录或重新授权。
 
 真实引擎开放 ChatGPT 登录；mock 的供应商列表返回 `chatgpt.enabled=false`，配置操作返回 `409 engine_disabled`。多个 ChatGPT 实例可在不同会话同时使用，凭据与失败状态按实例隔离。重新授权复用该实例的注册并校验身份一致；需要其他账号时新建实例。
 
@@ -88,16 +56,11 @@
 
 正常关闭开始后拒绝尚未开始的排队登录；若回调监听器正在启动，先回收监听器再结束登录请求，不发布新的待完成尝试。已开始的令牌轮换仍等待落盘，避免丢失已签发的替换令牌。已开始的账号退出在停止任务、远程撤销和本地保存期间均会被关闭流程等待，成功或失败后才释放数据目录。桌面宿主仍有 60 秒强制终止兜底，强制终止时无法保证退出操作完成。
 
-### 参数约束
+### 参数规范化
 
-| 字段             | 约束                                                                              |
-| ---------------- | --------------------------------------------------------------------------------- |
-| `message`        | 必须是非空白字符串，原始长度最多 32000；保存与幂等比较前会去除首尾空白。          |
-| `requestId`      | 必须为 8–128 位字符串，只含 ASCII 字母、数字、下划线或连字符。客户端可使用 UUID。 |
-| `expectedTarget` | 真实引擎的新任务必须提供界面显示的实例和模型引用，演示引擎可省略。                |
-| `title`          | 去除首尾空白后长度为 1–100。                                                      |
+字段、枚举和长度上限见 OpenAPI。`message` 先检查原始长度，再去除首尾空白用于保存和幂等比较；`title` 先去除首尾空白，再检查长度。长度按 JavaScript `string.length` 计算，由 `x-utf16-maxLength` 和 `x-trimmed-utf16-maxLength` 明确声明；生成的校验器执行相同规则，避免把 UTF-16 长度改成 Unicode 码点数。
 
-上述长度按 JavaScript `string.length` 计算，具体规则以 contracts 的解析函数为准。
+真实引擎的新任务还要求 `expectedTarget` 等于界面显示的实例和模型引用，演示引擎可省略。这类依赖运行状态的约束由业务层检查。
 
 ## 会话与任务语义
 
@@ -227,4 +190,13 @@ data: {"apiVersion":1,"conversationId":"conversation-id","runId":"run-id","seque
 
 ## 维护约定
 
-修改字段或校验时同步更新 contracts 与其测试；修改任务、状态或恢复语义时同步更新本文及相应模块测试。新增不兼容语义需明确版本策略，避免前后端独立演进时静默接受错误数据。
+1. 通过 [openapi.yaml](../api/openapi.yaml) 维护路径和组件索引；路径定义位于 `api/paths/`，Schema 位于 `api/components/schemas/`，均按聊天、模型和 ChatGPT 授权分组。公共参数与错误响应分别位于 `api/components/parameters.yaml` 和 `api/components/responses.yaml`。入口的每个路径项使用 `$ref`；跨文件引用相对所在文件解析，仅支持本地文件。请求与响应的 JSON 载荷必须引用入口 `components.schemas` 中登记的具名 Schema。
+2. 在仓库根目录运行 `npm run generate:contracts`，并提交 `packages/contracts/src/generated/` 中的产物。生成器先汇总外部引用并保留具名组件，再校验 OpenAPI，生成共享 TypeScript 类型（含各操作的路径参数）、Ajv 独立校验器、HTTP 路由元数据及前端输入约束；生成文件带有禁止手改的注释。
+3. 调整受影响的业务处理、手写解析层和现有测试。HTTP 数据先按生成 Schema 校验，再由解析函数进行规范化和公开字段投影，组合处复用现有解析器。响应缺少必填字段或常量不符时拒绝，不补默认值或改写常量掩盖不兼容。请求允许的领域默认值、trim、URL 规范化、模型长度关系、唯一性、凭据头限制、跨字段标识一致性和幂等/状态时序继续由领域或语义层实现。HTTP 层调用接受已验证输入的领域函数；领域包对文件、SDK 等未知输入的独立解析器继续保留，不作为 HTTP 结构校验的第二来源。路由元数据和字段约束从 `@learn-electron/contracts/http` 获取，生成校验器及通用校验函数从 `@learn-electron/contracts/validation` 获取。
+4. 运行 `npm run check:contracts`：先按 [Spectral 规则](../api/.spectral.yaml) 检查引用、操作标识、路径参数、鉴权继承和默认错误响应，再由生成器校验 OpenAPI 结构并检查规范与生成产物是否一致；不修改契约或生成物。该命令已纳入 `npm run check` 和 contracts 的测试准备步骤；`npm run lint:api` 可单独执行约定检查。再按影响运行类型、lint、格式和相关测试。修改任务、状态或恢复语义时同步更新本文；不兼容变更需明确版本策略。
+
+OpenAPI 3.1 的 SSE 响应以 `text/event-stream` 字符串描述传输，`x-event-schema` 指向每条 `data` JSON 的 `RunEvent` Schema；不将整个流误描述为 JSON 响应。`x-max-body-bytes` 声明 JSON 正文的字节上限。两种 UTF-16 长度扩展由生成器注册为校验关键字；外部工具需实现这些扩展才能执行同样的长度检查。生成的校验器无需在应用启动时编译 Schema，也不依赖 Node、Ajv 编译器或运行时动态代码生成。
+
+Electron [原生桥契约](../packages/contracts/src/native.ts) 继续独立维护，OpenAPI 仅作为 HTTP API 契约源头。
+
+HTTP 错误响应同样按 `ApiError` Schema 解析；代理返回 HTML 或不满足该结构的 JSON 时，客户端使用 HTTP 状态提示，不信任部分字段。表单请求头和输入长度、数值上限使用生成校验器及 `httpConstraints`，避免另写结构判断或复制限制。供应商预设属于界面数据，模型连接和认证包的内部类型属于领域模型；它们独立于 HTTP DTO，HTTP 边界的类型使用生成定义。

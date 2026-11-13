@@ -27,7 +27,7 @@ flowchart LR
 | `packages/agent-runtime`     | AgentEngine、Pi 适配、显式 mock 引擎                | 不依赖 HTTP 协议或应用模块，不暴露 Pi 类型给应用             |
 | `packages/chatgpt-auth`      | ChatGPT OAuth、账户状态、令牌刷新与撤销             | 不依赖 Pi、HTTP 契约、模型连接或应用，通过接口接收存储       |
 | `packages/model-connections` | 实例配置、模型引用、执行目标与纯校验                | 无 SDK、HTTP、Node 或应用依赖                                |
-| `packages/contracts`         | HTTP 类型与校验、最小原生桥契约                     | 纯 TypeScript，无应用或运行时实现依赖                        |
+| `packages/contracts`         | HTTP 生成类型与校验、语义解析及原生桥               | 无应用或 SDK 实现依赖；生成器仅在开发期运行                  |
 
 后端按业务能力与传输职责组织模块，根目录只保留 `cli.ts`、`desktop-child.ts`、`lifecycle.ts` 和 `server.ts` 四个启动、进程与装配入口。当前模块均为 `src` 的直接子目录，跨模块引用只通过各自的 `index.ts`；模块内部直接引用具体文件。
 
@@ -170,4 +170,6 @@ Pi 适配层在 SDK 导入后初始化进程级环境代理，使用 Undici 的�
 - 新增原生能力扩展最小桥接契约、preload 和平台适配。
 - 新增工具在 Runtime 中实现并经过工具策略授权；工作目录本身不构成权限沙箱。
 
-协议字段与校验以 contracts 为准，变更与测试要求见 [协议维护约定](protocol.md#维护约定)。
+HTTP 路径、请求、响应和结构约束以 [OpenAPI](../api/openapi.yaml) 为源头。`api/` 只维护与语言无关的规范：入口通过外部 `$ref` 引用按聊天、模型和 ChatGPT 授权拆分的路径与 Schema，公共参数和错误响应集中复用。生成器解析并汇总本地引用，校验后将共享 TypeScript 类型、浏览器可用的独立校验器和路由元数据输出到 `packages/contracts/src/generated/`；应用仍通过 contracts 包消费，不直接读取 YAML。`contracts/http` 只导出元数据与约束，不加载校验器；校验器及通用校验函数由 `contracts/validation` 导出。
+
+后端从生成元数据注册路径、方法和成功状态码，仍按需读取正文并调用 contracts 解析器，保留鉴权和状态错误的优先级。前端沿用同包响应解析器，结构校验来自生成产物，规范化、公开字段投影和跨字段一致性检查集中在现有解析函数中，组合处直接复用解析器。领域配置规则继续归 model-connections 所有，领域包和原生桥不反向依赖 HTTP 生成器。生成流程及测试要求见 [协议维护约定](protocol.md#维护约定)。

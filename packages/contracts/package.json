@@ -7,12 +7,15 @@
     ".": "./src/index.ts",
     "./native": "./src/native.ts",
     "./chatgpt": "./src/chatgpt.ts",
-    "./models": "./src/models.ts"
+    "./models": "./src/models.ts",
+    "./http": "./src/generated/http.ts",
+    "./validation": "./src/validation.ts"
   },
   "dependencies": {
     "@learn-electron/model-connections": "*"
   },
   "scripts": {
+    "pretest": "npm run check:contracts --prefix ../..",
     "test": "node --test test/*.test.mjs"
   }
 }

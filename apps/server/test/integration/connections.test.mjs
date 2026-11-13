@@ -11,6 +11,7 @@ import { createServer } from 'node:http'
 import { ChatGPTProvider } from '../../src/chatgpt/index.ts'
 import { oauthFixture } from '../helpers/chatgpt.mjs'
 import { modelProvider } from '../helpers/model-provider.mjs'
+import { assertApiResponse } from '../helpers/contracts.mjs'
 
 async function fixture(t, overrides = {}) {
   const remote = await modelProvider(t)
@@ -29,7 +30,7 @@ async function fixture(t, overrides = {}) {
   await starting
   t.signal.throwIfAborted()
   async function request(path, method = 'GET', body) {
-    return fetch(`${backend.url}/api/v1${path}`, {
+    const response = await fetch(`${backend.url}/api/v1${path}`, {
       method,
       signal: t.signal,
       headers: {
@@ -38,6 +39,7 @@ async function fixture(t, overrides = {}) {
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     })
+    return assertApiResponse(response, path, method)
   }
   async function json(path, method = 'GET', body) {
     const response = await request(path, method, body)

@@ -1,6 +1,7 @@
 import type { ServerResponse } from 'node:http'
 import type { FastifyReply } from 'fastify'
 import type { RunEvent } from '@learn-electron/contracts'
+import { httpOperations } from '@learn-electron/contracts/http'
 import type { ChatService } from '../chat/index.ts'
 
 const MAX_STREAM_BUFFER = 1024 * 1024
@@ -30,7 +31,7 @@ export async function streamRun(chat: ChatService, id: string, reply: FastifyRep
   }
   response.once('close', subscription.unsubscribe)
   reply.hijack()
-  response.writeHead(200, {
+  response.writeHead(httpOperations.streamRunEvents.successStatus, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'X-Accel-Buffering': 'no',
     Connection: 'keep-alive',

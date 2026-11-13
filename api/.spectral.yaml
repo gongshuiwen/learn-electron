@@ -1,0 +1,33 @@
+extends:
+  - [spectral:oas, off]
+rules:
+  # OpenAPI 结构由生成器校验；这里检查项目约定。
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-operationId-valid-in-url: error
+  path-params: error
+  service-token-security:
+    description: 所有业务接口统一使用本地服务令牌。
+    severity: error
+    given: $
+    then:
+      field: security
+      function: schema
+      functionOptions:
+        schema:
+          const:
+            - serviceToken: []
+  operation-security-inherited:
+    description: 业务接口继承根级鉴权，不单独放宽访问要求。
+    severity: error
+    given: $.paths[*][get,put,post,delete,options,head,patch,trace]
+    then:
+      field: security
+      function: undefined
+  operation-error-response:
+    description: 每个操作必须声明默认错误响应。
+    severity: error
+    given: $.paths[*][get,put,post,delete,options,head,patch,trace]
+    then:
+      field: responses.default
+      function: truthy

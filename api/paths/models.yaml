@@ -1,0 +1,132 @@
+meta:
+  get:
+    operationId: getMeta
+    summary: 读取默认模型和服务状态，不访问上游
+    responses:
+      '200':
+        description: 服务元数据
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ServiceMeta' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+adapters:
+  get:
+    operationId: listModelAdapters
+    summary: 读取支持的协议和认证方式
+    responses:
+      '200':
+        description: 适配器列表
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ModelAdapters' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+providers:
+  get:
+    operationId: getProviders
+    summary: 读取脱敏供应商实例、默认选择及登录进度，不访问上游
+    responses:
+      '200':
+        description: 供应商状态
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ProvidersState' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+  post:
+    operationId: createProvider
+    summary: 创建端点或 ChatGPT 账号实例，不修改默认选择
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/models.yaml#/CreateProviderRequest' }
+    responses:
+      '201':
+        description: 更新后的供应商状态
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ProvidersState' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+provider:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  patch:
+    operationId: updateProvider
+    summary: 更新端点完整配置及可选凭据
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/models.yaml#/SaveProviderRequest' }
+    responses:
+      '200':
+        description: 更新后的供应商状态
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ProvidersState' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+  delete:
+    operationId: deleteProvider
+    summary: 删除实例，清空引用它的默认选择，不自动选择替代实例
+    responses:
+      '200':
+        description: 更新后的供应商状态
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ProvidersState' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+providerModels:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  get:
+    operationId: listProviderModels
+    summary: 只读本地模型目录，不访问上游
+    responses:
+      '200':
+        description: 模型目录
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ModelDefinitions' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+refreshProviderModels:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  post:
+    operationId: refreshProviderModels
+    summary: 显式请求上游模型目录，保留手填模型
+    responses:
+      '200':
+        description: 更新后的模型目录
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ModelDefinitions' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+testProvider:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  post:
+    operationId: testProvider
+    summary: 测试指定模型，不创建会话或修改聊天上下文
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/models.yaml#/ProviderTestRequest' }
+    responses:
+      '204': { description: 测试成功，无正文 }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+defaultModel:
+  put:
+    operationId: selectDefaultModel
+    summary: 设置新会话默认模型，不改变已有会话绑定
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/models.yaml#/ModelRef' }
+    responses:
+      '200':
+        description: 更新后的供应商状态
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/models.yaml#/ProvidersState' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }

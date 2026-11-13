@@ -5,6 +5,7 @@ import {
   ModelError,
   modelRef,
   parseConnectionConfig,
+  normalizeConnectionConfig,
   parseHeaders,
   parseIdentifier,
   parseModelDefinition,
@@ -23,6 +24,7 @@ import type {
   ModelStatus,
   ProvidersState,
   SaveProviderRequest,
+  ModelDefinition as HttpModelDefinition,
 } from '@learn-electron/contracts/models'
 import { ApplicationError, ProtectedFile } from '../shared/index.ts'
 
@@ -34,7 +36,7 @@ export interface ModelAccounts {
   view(): Omit<ProvidersState, 'defaultSelection'>
   describe(id: string): { provider: string; authMode: 'chatgpt' } | undefined
   resolve(ref: ModelRef): ModelTarget
-  models(id: string, refresh?: boolean): Promise<Array<{ id: string; name: string }>>
+  models(id: string, refresh?: boolean): Promise<Array<Pick<ModelDefinition, 'id' | 'name'>>>
   credentials(target: ModelTarget, signal: AbortSignal): Promise<RequestCredentials>
   failed(id: string, code: ModelErrorCode): Promise<void>
   createProfile(): Promise<string>
@@ -283,7 +285,7 @@ export class ModelService implements CredentialResolver {
           'connection_identity_changed',
           '地址或协议变更请添加新实例，以保留会话归属',
         )
-      const config = parseConnectionConfig(request)
+      const config = normalizeConnectionConfig(request)
       const entry: SavedInstance = {
         ...config,
         id: existing?.id ?? randomUUID(),
@@ -334,13 +336,13 @@ export class ModelService implements CredentialResolver {
       return this.status()
     })
   }
-  models(id: string): Promise<ModelDefinition[]> {
+  models(id: string): Promise<HttpModelDefinition[]> {
     const entry = this.state.instances.find((item) => item.id === id)
     return entry
       ? Promise.resolve(structuredClone(entry.models))
       : this.accounts.models(id).then((items) => items.map(parseModelDefinition))
   }
-  refreshModels(id: string): Promise<ModelDefinition[]> {
+  refreshModels(id: string): Promise<HttpModelDefinition[]> {
     if (this.closed) return Promise.reject(new ApplicationError('shutting_down', '服务正在停止'))
     const entry = this.state.instances.find((item) => item.id === id)
     if (!entry)

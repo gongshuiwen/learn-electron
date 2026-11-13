@@ -1,0 +1,107 @@
+openapi: 3.1.0
+info:
+  title: Pi Chat HTTP API
+  version: 1.0.0
+  description: |
+    单用户本地 HTTP API。所有业务接口校验 Host、Origin 和 Bearer；通过 Host/Origin
+    检查的 OPTIONS 请求返回 204，无需 Bearer。JSON 正文最多 160 KiB。
+    无正文的操作忽略请求正文。GET 元数据、历史、供应商状态和模型目录只读本地状态，
+    不调用远端模型；刷新目录和测试必须显式 POST。
+    字段及 HTTP 结构以本文为准，任务、幂等和 SSE 恢复语义见 ../docs/protocol.md。
+servers:
+  - url: /api/v1
+security:
+  - serviceToken: []
+x-max-body-bytes: 163840
+paths:
+  /meta:
+    $ref: './paths/models.yaml#/meta'
+  /conversations:
+    $ref: './paths/chat.yaml#/conversations'
+  /conversations/{id}:
+    $ref: './paths/chat.yaml#/conversation'
+  /conversations/{id}/model:
+    $ref: './paths/chat.yaml#/conversationModel'
+  /conversations/{id}/runs:
+    $ref: './paths/chat.yaml#/conversationRuns'
+  /runs/{id}/events:
+    $ref: './paths/chat.yaml#/runEvents'
+  /runs/{id}/cancel:
+    $ref: './paths/chat.yaml#/cancelRun'
+  /model-adapters:
+    $ref: './paths/models.yaml#/adapters'
+  /model-providers:
+    $ref: './paths/models.yaml#/providers'
+  /model-providers/{id}:
+    $ref: './paths/models.yaml#/provider'
+  /model-providers/{id}/models:
+    $ref: './paths/models.yaml#/providerModels'
+  /model-providers/{id}/models/refresh:
+    $ref: './paths/models.yaml#/refreshProviderModels'
+  /model-providers/{id}/test:
+    $ref: './paths/models.yaml#/testProvider'
+  /model:
+    $ref: './paths/models.yaml#/defaultModel'
+  /model-providers/{id}/auth/attempts:
+    $ref: './paths/chatgpt.yaml#/loginAttempts'
+  /model-providers/{id}/auth/logout:
+    $ref: './paths/chatgpt.yaml#/logout'
+  /model-auth-attempts/{id}:
+    $ref: './paths/chatgpt.yaml#/loginAttempt'
+  /model-auth-attempts/{id}/cancel:
+    $ref: './paths/chatgpt.yaml#/cancelLogin'
+components:
+  securitySchemes:
+    serviceToken:
+      type: http
+      scheme: bearer
+      description: Web/桌面代理注入的本地服务令牌，不是模型凭据
+  parameters:
+    ResourceId: { $ref: './components/parameters.yaml#/ResourceId' }
+  responses:
+    ApiError: { $ref: './components/responses.yaml#/ApiError' }
+  schemas:
+    ApiVersion: { $ref: './components/schemas/common.yaml#/ApiVersion' }
+    ServiceVersionInfo: { $ref: './components/schemas/common.yaml#/ServiceVersionInfo' }
+    Identifier: { $ref: './components/schemas/common.yaml#/Identifier' }
+    ModelId: { $ref: './components/schemas/models.yaml#/ModelId' }
+    ModelRef: { $ref: './components/schemas/models.yaml#/ModelRef' }
+    ModelBinding: { $ref: './components/schemas/models.yaml#/ModelBinding' }
+    ModelStatus: { $ref: './components/schemas/models.yaml#/ModelStatus' }
+    ServiceMeta: { $ref: './components/schemas/models.yaml#/ServiceMeta' }
+    Conversation: { $ref: './components/schemas/chat.yaml#/Conversation' }
+    Conversations: { $ref: './components/schemas/chat.yaml#/Conversations' }
+    Message: { $ref: './components/schemas/chat.yaml#/Message' }
+    RunStatus: { $ref: './components/schemas/chat.yaml#/RunStatus' }
+    Run: { $ref: './components/schemas/chat.yaml#/Run' }
+    Sequence: { $ref: './components/schemas/chat.yaml#/Sequence' }
+    ConversationSnapshot: { $ref: './components/schemas/chat.yaml#/ConversationSnapshot' }
+    RunEvent: { $ref: './components/schemas/chat.yaml#/RunEvent' }
+    StartRunRequest: { $ref: './components/schemas/chat.yaml#/StartRunRequest' }
+    RenameConversationRequest: { $ref: './components/schemas/chat.yaml#/RenameConversationRequest' }
+    CreateConversationRequest: { $ref: './components/schemas/chat.yaml#/CreateConversationRequest' }
+    ApiError: { $ref: './components/schemas/common.yaml#/ApiError' }
+    Protocol: { $ref: './components/schemas/models.yaml#/Protocol' }
+    ModelDefinitionInput: { $ref: './components/schemas/models.yaml#/ModelDefinitionInput' }
+    ModelDefinition: { $ref: './components/schemas/models.yaml#/ModelDefinition' }
+    ModelDefinitions: { $ref: './components/schemas/models.yaml#/ModelDefinitions' }
+    Compatibility: { $ref: './components/schemas/models.yaml#/Compatibility' }
+    ConnectionConfigInput: { $ref: './components/schemas/models.yaml#/ConnectionConfigInput' }
+    ConnectionConfig: { $ref: './components/schemas/models.yaml#/ConnectionConfig' }
+    CredentialHeaders: { $ref: './components/schemas/models.yaml#/CredentialHeaders' }
+    SaveProviderRequest: { $ref: './components/schemas/models.yaml#/SaveProviderRequest' }
+    CreateChatGPTProviderRequest:
+      { $ref: './components/schemas/chatgpt.yaml#/CreateChatGPTProviderRequest' }
+    CreateProviderRequest: { $ref: './components/schemas/models.yaml#/CreateProviderRequest' }
+    EndpointInstanceView: { $ref: './components/schemas/models.yaml#/EndpointInstanceView' }
+    ChatGPTProfile: { $ref: './components/schemas/chatgpt.yaml#/ChatGPTProfile' }
+    ChatGPTInstanceView: { $ref: './components/schemas/chatgpt.yaml#/ChatGPTInstanceView' }
+    ProviderInstanceView: { $ref: './components/schemas/models.yaml#/ProviderInstanceView' }
+    ProvidersState: { $ref: './components/schemas/models.yaml#/ProvidersState' }
+    ModelAdapterView: { $ref: './components/schemas/models.yaml#/ModelAdapterView' }
+    ModelAdapters: { $ref: './components/schemas/models.yaml#/ModelAdapters' }
+    ProviderTestRequest: { $ref: './components/schemas/models.yaml#/ProviderTestRequest' }
+    ChatGPTModel: { $ref: './components/schemas/chatgpt.yaml#/ChatGPTModel' }
+    ChatGPTModels: { $ref: './components/schemas/chatgpt.yaml#/ChatGPTModels' }
+    ChatGPTLogin: { $ref: './components/schemas/chatgpt.yaml#/ChatGPTLogin' }
+    LogoutResult: { $ref: './components/schemas/chatgpt.yaml#/LogoutResult' }

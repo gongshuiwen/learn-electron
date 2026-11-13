@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { isRecord } from '@learn-electron/contracts'
+import { isObject } from '@learn-electron/model-connections'
 import { parseChatGPTModels } from '@learn-electron/contracts/chatgpt'
 import type { SavedConnections, Tokens } from '@learn-electron/chatgpt-auth'
 import { ProtectedFile } from '../shared/index.ts'
 
 function validTokens(value: unknown): value is Tokens {
   return (
-    isRecord(value) &&
+    isObject(value) &&
     typeof value.accessToken === 'string' &&
     typeof value.expiresAt === 'number' &&
     Number.isFinite(value.expiresAt) &&
@@ -22,7 +22,7 @@ function validTokens(value: unknown): value is Tokens {
 
 function decode(value: unknown): SavedConnections {
   if (
-    !isRecord(value) ||
+    !isObject(value) ||
     value.version !== 2 ||
     typeof value.hostId !== 'string' ||
     !/^urn:uuid:[\da-f-]{36}$/i.test(value.hostId) ||
@@ -31,7 +31,7 @@ function decode(value: unknown): SavedConnections {
     throw new Error('ChatGPT 凭证文件格式无效')
   for (const profile of value.profiles) {
     if (
-      !isRecord(profile) ||
+      !isObject(profile) ||
       typeof profile.id !== 'string' ||
       (profile.clientId !== undefined && typeof profile.clientId !== 'string') ||
       ['subject', 'email'].some(

@@ -10,7 +10,7 @@ test('ChatGPT contracts accept public DTOs and reject malformed authorization st
     status: 'connected',
     planUsage: true,
   }
-  assert.deepEqual(parseChatGPTProfile(profile), profile)
+  assert.deepEqual(parseChatGPTProfile({ ...profile, tokens: 'test-only-token' }), profile)
   for (const status of ['authorizing', 'busy'])
     assert.equal(parseChatGPTProfile({ ...profile, status }).status, status)
   const pendingLogin = {
@@ -19,7 +19,14 @@ test('ChatGPT contracts accept public DTOs and reject malformed authorization st
     authorizationUrl: 'https://auth.openai.com/api/accounts/authorize',
     expiresAt: '2026-11-09T12:00:00Z',
   }
-  assert.deepEqual(parseChatGPTLogin(pendingLogin), pendingLogin)
+  assert.deepEqual(
+    parseChatGPTLogin({
+      ...pendingLogin,
+      tokens: 'test-only-token',
+      instanceId: 'unused-instance',
+    }),
+    pendingLogin,
+  )
   assert.throws(() => parseChatGPTLogin({ ...pendingLogin, status: 'completed' }))
   assert.equal(
     parseChatGPTLogin({ ...pendingLogin, status: 'completed', instanceId: 'account-1' }).instanceId,

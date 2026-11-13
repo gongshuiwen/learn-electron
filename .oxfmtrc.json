@@ -6,5 +6,12 @@
   "printWidth": 100,
   "endOfLine": "lf",
   "sortPackageJson": false,
-  "ignorePatterns": ["node_modules/", "out/", "dist/", "package-lock.json", "*.tsbuildinfo"]
+  "ignorePatterns": [
+    "node_modules/",
+    "out/",
+    "dist/",
+    "package-lock.json",
+    "*.tsbuildinfo",
+    "packages/contracts/src/generated/validators.js"
+  ]
 }

@@ -1,4 +1,4 @@
-import { API_PREFIX, isRecord } from '@learn-electron/contracts'
+import { API_PREFIX, parseApiError, type ApiError } from '@learn-electron/contracts'
 import { platform } from '@/platform'
 
 export const apiBase = `${platform.apiBaseUrl}${API_PREFIX}`
@@ -8,7 +8,7 @@ export class ProtocolError extends Error {}
 export class ApiRequestError extends Error {
   constructor(
     readonly status: number,
-    readonly code: string | undefined,
+    readonly code: ApiError['error']['code'] | undefined,
     message: string,
   ) {
     super(message)
@@ -24,12 +24,11 @@ export async function readRequestError(response: Response): Promise<ApiRequestEr
   let code: string | undefined
   try {
     const body: unknown = await response.json()
-    if (isRecord(body) && isRecord(body.error)) {
-      if (typeof body.error.message === 'string') message = body.error.message
-      if (typeof body.error.code === 'string') code = body.error.code
-    }
+    const parsed = parseApiError(body)
+    message = parsed.error.message
+    code = parsed.error.code
   } catch {
-    // Proxies can return an HTML error page rather than the API error envelope.
+    // Proxies can return HTML or JSON that does not satisfy the API error contract.
   }
   return new ApiRequestError(response.status, code, message)
 }

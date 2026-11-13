@@ -8,7 +8,7 @@ React 前端、独立 Node 后端与 Electron 桌面集成组成的单用户聊�
 - [构建与交付](docs/build-and-delivery.md)：构建命令与产物、生产 Web 部署和 Windows 打包。
 - [前后端协议](docs/protocol.md)：HTTP 接口、幂等提交、任务状态、SSE 和恢复语义。
 - [测试指南](docs/testing.md)：测试命令、构建准备、覆盖范围与交付验证。
-- [HTTP 契约源码](packages/contracts/src/index.ts)：字段类型与运行时校验的唯一来源。
+- [OpenAPI HTTP 契约](api/openapi.yaml)：路径、请求、响应、鉴权和数据结构的源头；共享 TypeScript 类型与运行时校验由它生成。
 - [扩展与维护](docs/architecture.md#扩展与维护)：引擎、存储、工具和桌面能力的扩展位置。
 
 ## 目录与责任
@@ -17,7 +17,8 @@ React 前端、独立 Node 后端与 Electron 桌面集成组成的单用户聊�
 apps/web/                   React 界面、HTTP 客户端、事件流与主题
 apps/server/                HTTP API、鉴权、任务调度、SQLite 存储与启动入口
 apps/desktop/               Electron 窗口、系统集成、本地服务监管与代理
-packages/contracts/         应用自己的请求、响应、事件和参数校验
+api/                        OpenAPI 入口、按业务拆分的路径与组件、Spectral 规则
+packages/contracts/         HTTP 生成类型与校验、语义解析及原生桥
 packages/model-connections/ 与 SDK 无关的连接定义、模型元数据和纯校验
 packages/chatgpt-auth/      ChatGPT OAuth、账户状态与令牌生命周期
 packages/agent-runtime/     AgentEngine 接口、Pi 适配器、显式模拟引擎

@@ -36,12 +36,6 @@ export interface ModelRef {
   modelId: string
 }
 
-/** Demo conversations do not have an external model binding. */
-export interface ModelBinding {
-  instanceId: string
-  modelId: string | null
-}
-
 interface TargetBase {
   instanceId: string
   revision: number
@@ -134,36 +128,59 @@ export function parseApiKey(value: unknown): string {
   return value
 }
 
-function positiveInteger(value: unknown, fallback: number, label: string): number {
-  if (value === undefined) return fallback
+function positiveInteger(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 10_000_000)
     throw new Error(`${label}无效`)
   return value
 }
 
-export function parseModelDefinition(value: unknown): ModelDefinition {
-  if (!isObject(value)) throw new Error('模型配置无效')
-  const id = parseModelId(value.id)
-  const contextWindow = positiveInteger(value.contextWindow, 32768, '上下文长度')
-  const maxOutputTokens = positiveInteger(
-    value.maxOutputTokens,
-    Math.min(4096, contextWindow),
-    '最大输出长度',
-  )
+type ModelInput = Pick<ModelDefinition, 'id'> & Partial<Omit<ModelDefinition, 'id'>>
+type ConnectionInput = Omit<ConnectionConfig, 'vendor' | 'models' | 'compatibility'> &
+  Partial<Pick<ConnectionConfig, 'vendor' | 'compatibility'>> & { models: ModelInput[] }
+
+function normalizeModelDefinition(value: ModelInput): ModelDefinition {
+  const id = value.id.trim()
+  const contextWindow = value.contextWindow ?? 32768
+  const maxOutputTokens = value.maxOutputTokens ?? Math.min(4096, contextWindow)
   if (maxOutputTokens > contextWindow) throw new Error('最大输出长度不能超过上下文长度')
   return {
     id,
-    name: value.name === undefined ? id : text(value.name, '模型名称', 200),
+    name: value.name === undefined ? id : value.name.trim(),
     contextWindow,
     maxOutputTokens,
   }
 }
 
+/** Normalize structurally validated input and enforce model relationships. */
+export function normalizeModels(value: readonly ModelInput[]): ModelDefinition[] {
+  const models = value.map(normalizeModelDefinition)
+  assertUniqueModelIds(models)
+  return models
+}
+
+function assertUniqueModelIds(models: readonly ModelDefinition[]): void {
+  if (new Set(models.map(({ id }) => id)).size !== models.length)
+    throw new Error('模型 ID 不能重复')
+}
+
+export function parseModelDefinition(value: unknown): ModelDefinition {
+  if (!isObject(value)) throw new Error('模型配置无效')
+  return normalizeModelDefinition({
+    id: parseModelId(value.id),
+    ...(value.name === undefined ? {} : { name: text(value.name, '模型名称', 200) }),
+    ...(value.contextWindow === undefined
+      ? {}
+      : { contextWindow: positiveInteger(value.contextWindow, '上下文长度') }),
+    ...(value.maxOutputTokens === undefined
+      ? {}
+      : { maxOutputTokens: positiveInteger(value.maxOutputTokens, '最大输出长度') }),
+  })
+}
+
 export function parseModels(value: unknown): ModelDefinition[] {
   if (!Array.isArray(value) || value.length > 200) throw new Error('模型列表无效，最多 200 个模型')
   const models = value.map(parseModelDefinition)
-  if (new Set(models.map(({ id }) => id)).size !== models.length)
-    throw new Error('模型 ID 不能重复')
+  assertUniqueModelIds(models)
   return models
 }
 
@@ -204,7 +221,23 @@ export function parseConnectionConfig(value: unknown): ConnectionConfig {
   if (!isObject(value)) throw new Error('连接配置必须是 JSON 对象')
   if (!protocols.includes(value.protocol as Protocol)) throw new Error('不支持的模型协议')
   const protocol = value.protocol as Protocol
-  const url = new URL(text(value.baseUrl, 'API 地址', 2000))
+  const authentication = value.authentication
+  if (authentication !== 'api-key' && authentication !== 'none') throw new Error('认证方式无效')
+  return normalizeConnectionConfig({
+    vendor: value.vendor === undefined ? 'custom' : text(value.vendor, '供应商标识', 100),
+    name: text(value.name, '连接名称', 100),
+    protocol,
+    baseUrl: text(value.baseUrl, 'API 地址', 2000),
+    authentication,
+    models: parseModels(value.models),
+    compatibility: parseCompatibility(value.compatibility),
+  })
+}
+
+/** Structural checks belong to the caller's boundary; these rules apply to every transport. */
+export function normalizeConnectionConfig(value: ConnectionInput): ConnectionConfig {
+  const { protocol, authentication } = value
+  const url = new URL(value.baseUrl.trim())
   if (
     !['http:', 'https:'].includes(url.protocol) ||
     url.username ||
@@ -213,31 +246,25 @@ export function parseConnectionConfig(value: unknown): ConnectionConfig {
     url.hash
   )
     throw new Error('API 地址须为无凭据、查询参数和片段的 HTTP(S) 地址')
-  const authentication = value.authentication
-  if (authentication !== 'api-key' && authentication !== 'none') throw new Error('认证方式无效')
   if (authentication === 'none' && protocol !== 'openai-chat' && protocol !== 'openai-responses')
     throw new Error('无需认证仅适用于 OpenAI 兼容协议')
-  const compatibility = parseCompatibility(value.compatibility)
+  const compatibility = value.compatibility ?? {}
   if (protocol !== 'openai-chat' && Object.keys(compatibility).length)
     throw new Error('兼容选项仅适用于 Chat Completions 协议')
   return {
-    vendor: value.vendor === undefined ? 'custom' : text(value.vendor, '供应商标识', 100),
-    name: text(value.name, '连接名称', 100),
+    vendor: value.vendor === undefined ? 'custom' : value.vendor.trim(),
+    name: value.name.trim(),
     protocol,
     baseUrl: url.href.replace(/\/+$/, ''),
     authentication,
-    models: parseModels(value.models),
+    models: normalizeModels(value.models),
     compatibility,
   }
 }
 
-/** Header values are literal secrets; never evaluate environment or command expressions. */
-export function parseHeaders(value: unknown): Record<string, string> {
-  if (!isObject(value) || Object.keys(value).length > 20) throw new Error('自定义请求头无效')
-  const result: Record<string, string> = {}
-  for (const [name, valueText] of Object.entries(value)) {
-    if (
-      !/^[!#$%&'*+.^_`|~\w-]+$/.test(name) ||
+export function assertAllowedCredentialHeaders(headers: Record<string, unknown>): void {
+  if (
+    Object.keys(headers).some((name) =>
       [
         'host',
         'content-length',
@@ -247,7 +274,20 @@ export function parseHeaders(value: unknown): Record<string, string> {
         '__proto__',
         'constructor',
         'prototype',
-      ].includes(name.toLowerCase()) ||
+      ].includes(name.toLowerCase()),
+    )
+  )
+    throw new Error('自定义请求头名称或内容无效')
+}
+
+/** Header values are literal secrets; never evaluate environment or command expressions. */
+export function parseHeaders(value: unknown): Record<string, string> {
+  if (!isObject(value) || Object.keys(value).length > 20) throw new Error('自定义请求头无效')
+  assertAllowedCredentialHeaders(value)
+  const result: Record<string, string> = {}
+  for (const [name, valueText] of Object.entries(value)) {
+    if (
+      !/^[!#$%&'*+.^_`|~\w-]+$/.test(name) ||
       typeof valueText !== 'string' ||
       valueText.length > 8192 ||
       hasControls(valueText)

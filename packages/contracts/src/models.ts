@@ -1,71 +1,41 @@
 import {
-  isObject,
-  protocols,
-  parseConnectionConfig,
-  parseHeaders,
-  parseIdentifier,
-  parseModels,
-  parseModelId,
-  parseModelRef,
-  parseApiKey,
-  type ConnectionConfig,
-  type ModelDefinition,
-  type Protocol,
-  type ModelRef,
-  type ModelBinding,
+  normalizeConnectionConfig,
+  normalizeModels,
+  assertAllowedCredentialHeaders,
 } from '@learn-electron/model-connections'
-import {
-  parseChatGPTLogin,
-  parseChatGPTProfile,
-  type ChatGPTLogin,
-  type ChatGPTProfile,
-} from './chatgpt.ts'
+import { parseChatGPTLogin, parseChatGPTProfile } from './chatgpt.ts'
+import { parseSchema } from './validation.ts'
+import type {
+  ConnectionConfig,
+  ModelAdapterView,
+  ModelDefinition,
+  ModelRef,
+  ModelStatus,
+  ProvidersState,
+  ProviderTestRequest,
+  SaveProviderRequest,
+  CreateConversationRequest,
+  CreateChatGPTProviderRequest,
+  CreateProviderRequest,
+  CredentialHeaders,
+} from './generated/types.ts'
 
-export {
-  parseModels,
-  parseModelRef,
-  type ConnectionConfig,
-  type ModelDefinition,
-  type Protocol,
-  type ModelRef,
-  type ModelBinding,
-}
+export type {
+  ConnectionConfig,
+  ModelDefinition,
+  Protocol,
+  ModelRef,
+  ModelBinding,
+  EndpointInstanceView,
+  ChatGPTInstanceView,
+  ProviderInstanceView,
+  ProvidersState,
+  ModelStatus,
+  SaveProviderRequest,
+  ModelAdapterView,
+  CreateProviderRequest,
+} from './generated/types.ts'
 
-export interface EndpointInstanceView extends ConnectionConfig {
-  id: string
-  kind: 'endpoint'
-  revision: number
-  hasCredential: boolean
-  hasHeaders: boolean
-}
-export interface ChatGPTInstanceView extends ChatGPTProfile {
-  kind: 'chatgpt'
-  vendor: 'openai'
-}
-export type ProviderInstanceView = EndpointInstanceView | ChatGPTInstanceView
-
-export interface ProvidersState {
-  defaultSelection: ModelRef | null
-  instances: ProviderInstanceView[]
-  chatgpt: { enabled: boolean; pendingLogin?: ChatGPTLogin }
-}
-export interface ModelStatus {
-  selection: ModelRef | null
-  target: ModelRef | null
-  model: { provider: string; id: string }
-  configured: boolean
-  reason?: string
-  authMode?: 'chatgpt'
-}
-export interface SaveProviderRequest extends ConnectionConfig {
-  apiKey?: string | null
-  headers?: Record<string, string>
-}
-export interface ModelAdapterView {
-  id: Protocol
-  name: string
-  authentication: Array<'api-key' | 'none'>
-}
 export const modelAdapters: readonly ModelAdapterView[] = [
   { id: 'openai-chat', name: 'OpenAI Chat Completions', authentication: ['api-key', 'none'] },
   { id: 'openai-responses', name: 'OpenAI Responses', authentication: ['api-key', 'none'] },
@@ -74,118 +44,120 @@ export const modelAdapters: readonly ModelAdapterView[] = [
 ]
 
 export function parseModelAdapters(value: unknown): ModelAdapterView[] {
-  if (!Array.isArray(value)) throw new Error('模型适配器响应无效')
-  return value.map((item) => {
-    if (
-      !isObject(item) ||
-      !protocols.includes(item.id as Protocol) ||
-      typeof item.name !== 'string' ||
-      !Array.isArray(item.authentication) ||
-      !item.authentication.length ||
-      !item.authentication.every((auth) => auth === 'api-key' || auth === 'none')
-    )
-      throw new Error('模型适配器响应无效')
-    return {
-      id: item.id as Protocol,
-      name: item.name,
-      authentication: item.authentication as ModelAdapterView['authentication'],
-    }
-  })
-}
-export function parseSaveProvider(value: unknown): SaveProviderRequest {
-  const config = parseConnectionConfig(value)
-  if (!isObject(value)) throw new Error('供应商配置无效')
-  return {
-    ...config,
-    ...(value.apiKey !== undefined
-      ? { apiKey: value.apiKey === null ? null : parseApiKey(value.apiKey) }
-      : {}),
-    ...(value.headers !== undefined ? { headers: parseHeaders(value.headers) } : {}),
-  }
-}
-export function parseProvidersState(value: unknown): ProvidersState {
-  if (
-    !isObject(value) ||
-    !Array.isArray(value.instances) ||
-    !isObject(value.chatgpt) ||
-    typeof value.chatgpt.enabled !== 'boolean'
-  )
-    throw new Error('模型供应商响应无效')
-  const pending =
-    value.chatgpt.pendingLogin === undefined
-      ? undefined
-      : parseChatGPTLogin(value.chatgpt.pendingLogin)
-  if (pending && pending.status !== 'pending') throw new Error('ChatGPT 登录进度格式无效')
-  return {
-    defaultSelection:
-      value.defaultSelection === null ? null : parseModelRef(value.defaultSelection),
-    chatgpt: { enabled: value.chatgpt.enabled, ...(pending ? { pendingLogin: pending } : {}) },
-    instances: value.instances.map((entry) => {
-      if (isObject(entry) && entry.kind === 'chatgpt')
-        return { ...parseChatGPTProfile(entry), kind: 'chatgpt', vendor: 'openai' }
-      const config = parseConnectionConfig(entry)
-      if (
-        !isObject(entry) ||
-        entry.kind !== 'endpoint' ||
-        !Number.isSafeInteger(entry.revision) ||
-        Number(entry.revision) < 1 ||
-        typeof entry.hasCredential !== 'boolean' ||
-        typeof entry.hasHeaders !== 'boolean'
-      )
-        throw new Error('模型供应商响应无效')
-      return {
-        ...config,
-        id: parseIdentifier(entry.id),
-        kind: 'endpoint',
-        revision: Number(entry.revision),
-        hasCredential: entry.hasCredential,
-        hasHeaders: entry.hasHeaders,
-      }
-    }),
-  }
-}
-export function parseModelStatus(value: unknown): ModelStatus {
-  if (
-    !isObject(value) ||
-    !isObject(value.model) ||
-    typeof value.model.provider !== 'string' ||
-    typeof value.model.id !== 'string' ||
-    typeof value.configured !== 'boolean' ||
-    (value.reason !== undefined && typeof value.reason !== 'string') ||
-    (value.authMode !== undefined && value.authMode !== 'chatgpt')
-  )
-    throw new Error('服务端模型状态格式不兼容，请刷新页面。')
-  return {
-    selection: value.selection === null ? null : parseModelRef(value.selection),
-    target: value.target === null ? null : parseModelRef(value.target),
-    model: { provider: value.model.provider, id: value.model.id },
-    configured: value.configured,
-    ...(value.reason !== undefined ? { reason: value.reason } : {}),
-    ...(value.authMode === 'chatgpt' ? { authMode: 'chatgpt' } : {}),
-  }
-}
-export function parseModelBinding(value: unknown): ModelBinding {
-  if (!isObject(value)) throw new Error('模型绑定无效')
-  return {
-    instanceId: parseIdentifier(value.instanceId),
-    modelId: value.modelId === null ? null : parseModelId(value.modelId),
-  }
-}
-export function parseProviderTest(value: unknown): { modelId: string } {
-  if (!isObject(value)) throw new Error('连接测试参数必须是 JSON 对象')
-  return { modelId: parseModelId(value.modelId) }
-}
-export function parseCreateConversation(value: unknown): { selection?: ModelRef } {
-  if (!isObject(value)) throw new Error('会话参数必须是 JSON 对象')
-  return value.selection === undefined ? {} : { selection: parseModelRef(value.selection) }
+  return parseSchema('ModelAdapters', value, '模型适配器响应无效').map((item) => ({
+    id: item.id,
+    name: item.name,
+    authentication: item.authentication,
+  }))
 }
 
-export interface ProviderPreset {
+export function parseModels(value: unknown): ModelDefinition[] {
+  return normalizeModels(parseSchema('ModelDefinitions', value, '模型目录格式无效'))
+}
+
+export function parseModelRef(value: unknown): ModelRef {
+  const ref = parseSchema('ModelRef', value, '模型选择无效')
+  return { instanceId: ref.instanceId, modelId: ref.modelId.trim() }
+}
+
+type NormalizedProviderRequest = ConnectionConfig & Pick<SaveProviderRequest, 'apiKey' | 'headers'>
+
+export function parseSaveProvider(value: unknown): NormalizedProviderRequest {
+  return normalizeSaveProvider(
+    parseSchema('SaveProviderRequest', value, '供应商配置或凭据格式无效'),
+  )
+}
+
+function normalizeSaveProvider(request: SaveProviderRequest): NormalizedProviderRequest {
+  if (request.headers !== undefined) assertAllowedCredentialHeaders(request.headers)
+  return {
+    ...normalizeConnectionConfig(request),
+    ...(request.apiKey !== undefined ? { apiKey: request.apiKey } : {}),
+    ...(request.headers !== undefined ? { headers: { ...request.headers } } : {}),
+  }
+}
+
+export function parseCredentialHeaders(value: unknown): CredentialHeaders {
+  const headers = parseSchema(
+    'CredentialHeaders',
+    value,
+    '请求头名称或内容无效，请填写字符串 JSON 对象。',
+  )
+  assertAllowedCredentialHeaders(headers)
+  return { ...headers }
+}
+
+function isChatGPTRequest(request: CreateProviderRequest): request is CreateChatGPTProviderRequest {
+  return 'kind' in request && request.kind === 'chatgpt'
+}
+
+export function parseCreateProvider(
+  value: unknown,
+): NormalizedProviderRequest | CreateChatGPTProviderRequest {
+  const request = parseSchema('CreateProviderRequest', value, '供应商配置无效')
+  return isChatGPTRequest(request) ? { kind: 'chatgpt' } : normalizeSaveProvider(request)
+}
+
+export function parseProvidersState(value: unknown): ProvidersState {
+  const state = parseSchema('ProvidersState', value, '模型供应商响应无效')
+  // Validate the wire DTO before normalization, then project only public fields.
+  const instances = state.instances.map((entry) => {
+    if (entry.kind === 'chatgpt')
+      return { ...parseChatGPTProfile(entry), kind: entry.kind, vendor: entry.vendor }
+    return {
+      ...normalizeConnectionConfig(entry),
+      id: entry.id,
+      kind: entry.kind,
+      revision: entry.revision,
+      hasCredential: entry.hasCredential,
+      hasHeaders: entry.hasHeaders,
+    }
+  })
+  return {
+    defaultSelection:
+      state.defaultSelection === null ? null : parseModelRef(state.defaultSelection),
+    instances,
+    chatgpt: {
+      enabled: state.chatgpt.enabled,
+      ...(state.chatgpt.pendingLogin
+        ? {
+            pendingLogin: {
+              ...parseChatGPTLogin(state.chatgpt.pendingLogin),
+              status: state.chatgpt.pendingLogin.status,
+            },
+          }
+        : {}),
+    },
+  }
+}
+
+export function parseModelStatus(value: unknown): ModelStatus {
+  const status = parseSchema('ModelStatus', value, '服务端模型状态格式不兼容，请刷新页面。')
+  return {
+    selection: status.selection === null ? null : parseModelRef(status.selection),
+    target: status.target === null ? null : parseModelRef(status.target),
+    model: { provider: status.model.provider, id: status.model.id },
+    configured: status.configured,
+    ...(status.reason !== undefined ? { reason: status.reason } : {}),
+    ...(status.authMode === undefined ? {} : { authMode: status.authMode }),
+  }
+}
+
+export function parseProviderTest(value: unknown): ProviderTestRequest {
+  const request = parseSchema('ProviderTestRequest', value, '连接测试参数无效')
+  return { modelId: request.modelId.trim() }
+}
+
+export function parseCreateConversation(value: unknown): CreateConversationRequest {
+  const request = parseSchema('CreateConversationRequest', value, '会话参数无效')
+  return request.selection === undefined ? {} : { selection: parseModelRef(request.selection) }
+}
+
+export type ProviderPreset = Pick<
+  ConnectionConfig,
+  'name' | 'protocol' | 'baseUrl' | 'authentication'
+> & {
   id: string
-  name: string
-  protocol: Protocol
-  baseUrl: string
-  authentication: 'api-key' | 'none'
 }
 
 /** App presets only; the wire protocol and model ID remain editable. */

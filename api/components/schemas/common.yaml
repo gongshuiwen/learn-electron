@@ -1,0 +1,22 @@
+ApiVersion:
+  type: integer
+  const: 1
+ServiceVersionInfo:
+  type: object
+  required: [apiVersion]
+  description: 在完整元数据校验前识别版本不兼容，仅用于协议诊断
+  properties:
+    apiVersion: { type: number }
+Identifier:
+  type: string
+  pattern: '^[A-Za-z0-9_-]{1,128}$'
+ApiError:
+  type: object
+  required: [error]
+  properties:
+    error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }

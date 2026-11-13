@@ -1,0 +1,8 @@
+ResourceId:
+  in: path
+  name: id
+  required: true
+  schema:
+    type: string
+    pattern: '^[A-Za-z0-9_-]+$'
+  description: 不透明资源标识；含百分号编码的路径不匹配 v1 路由

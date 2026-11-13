@@ -10,7 +10,7 @@
   "env": {
     "builtin": true
   },
-  "ignorePatterns": ["out/**", "dist/**"],
+  "ignorePatterns": ["out/**", "dist/**", "packages/contracts/src/generated/validators.js"],
   "rules": {
     "constructor-super": "error",
     "for-direction": "error",

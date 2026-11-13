@@ -1,274 +1,116 @@
-import {
-  parseModelBinding,
-  parseModelRef,
-  parseModelStatus,
-  type ModelStatus,
-  type ModelRef,
-  type ModelBinding,
-} from './models.ts'
+import { parseModelRef, parseModelStatus } from './models.ts'
+import { API_VERSION } from './generated/http.ts'
+import { isSchema, parseSchema } from './validation.ts'
+import type {
+  Conversation,
+  ConversationSnapshot,
+  Run,
+  RunEvent,
+  ServiceMeta,
+  StartRunRequest,
+  ApiError,
+} from './generated/types.ts'
 
-export const API_VERSION = 1 as const
-export const API_PREFIX = '/api/v1'
-
-export interface ServiceMeta extends ModelStatus {
-  apiVersion: typeof API_VERSION
-  engine: 'pi' | 'mock'
-  capabilities: { tools: boolean }
-}
-
-export interface Conversation {
-  id: string
-  title: string
-  createdAt: string
-  updatedAt: string
-  selection?: ModelRef
-  binding?: ModelBinding
-}
-
-export interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  createdAt: string
-  status: 'streaming' | 'complete' | 'interrupted'
-}
-
-export type RunStatus =
-  | 'running'
-  | 'cancelling'
-  | 'completed'
-  | 'cancelled'
-  | 'failed'
-  | 'interrupted'
-
-export interface Run {
-  id: string
-  conversationId: string
-  status: RunStatus
-  createdAt: string
-  updatedAt: string
-  error?: string
-  errorCode?: string
-  target?: ModelRef
-}
-
-export interface ConversationSnapshot {
-  conversation: Conversation
-  messages: Message[]
-  run: Run | null
-  sequence: number
-  model?: ModelStatus
-}
-
-interface EventBase {
-  apiVersion: typeof API_VERSION
-  conversationId: string
-  runId: string
-  sequence: number
-}
-
-export type RunEvent = EventBase &
-  (
-    | { type: 'snapshot'; snapshot: ConversationSnapshot }
-    | { type: 'message.delta'; messageId: string; delta: string }
-    | { type: 'message.completed'; message: Message }
-    | { type: 'run.updated'; run: Run }
-  )
-
-export interface StartRunRequest {
-  message: string
-  requestId: string
-  expectedTarget?: ModelRef
-}
-
-export interface ApiError {
-  error: { code: string; message: string }
-}
+export { API_VERSION, API_PREFIX } from './generated/http.ts'
+export type {
+  ApiError,
+  Conversation,
+  ConversationSnapshot,
+  Message,
+  Run,
+  RunEvent,
+  RunStatus,
+  ServiceMeta,
+  StartRunRequest,
+} from './generated/types.ts'
 
 export function isActiveRun(run: Run | null | undefined): boolean {
   return run?.status === 'running' || run?.status === 'cancelling'
 }
 
 export function parseStartRun(value: unknown): StartRunRequest {
-  if (!isRecord(value)) throw new Error('请求必须是 JSON 对象')
-  if (typeof value.message !== 'string' || !value.message.trim() || value.message.length > 32_000) {
-    throw new Error('消息必须包含 1 至 32000 个字符')
-  }
-  if (typeof value.requestId !== 'string' || !/^[\w-]{8,128}$/.test(value.requestId)) {
-    throw new Error('requestId 格式无效')
-  }
+  const body = parseSchema('StartRunRequest', value, '消息或 requestId 格式无效')
   return {
-    message: value.message.trim(),
-    requestId: value.requestId,
-    ...(value.expectedTarget === undefined
+    message: body.message.trim(),
+    requestId: body.requestId,
+    ...(body.expectedTarget === undefined
       ? {}
-      : { expectedTarget: parseModelRef(value.expectedTarget) }),
+      : { expectedTarget: parseModelRef(body.expectedTarget) }),
   }
 }
 
 export function parseTitle(value: unknown): string {
-  if (!isRecord(value) || typeof value.title !== 'string') throw new Error('缺少会话标题')
-  const title = value.title.trim()
-  if (!title || title.length > 100) throw new Error('标题必须包含 1 至 100 个字符')
-  return title
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isConversation(value: unknown): value is Conversation {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    typeof value.title === 'string' &&
-    typeof value.createdAt === 'string' &&
-    typeof value.updatedAt === 'string' &&
-    (value.selection === undefined || validModelValue(value.selection, parseModelRef)) &&
-    (value.binding === undefined || validModelValue(value.binding, parseModelBinding))
-  )
-}
-
-function validModelValue(value: unknown, parse: (value: unknown) => unknown): boolean {
-  try {
-    parse(value)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function isMessage(value: unknown): value is Message {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    (value.role === 'user' || value.role === 'assistant') &&
-    typeof value.content === 'string' &&
-    typeof value.createdAt === 'string' &&
-    typeof value.status === 'string' &&
-    ['streaming', 'complete', 'interrupted'].includes(value.status)
-  )
-}
-
-function isRun(value: unknown): value is Run {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    typeof value.conversationId === 'string' &&
-    typeof value.createdAt === 'string' &&
-    typeof value.updatedAt === 'string' &&
-    typeof value.status === 'string' &&
-    ['running', 'cancelling', 'completed', 'cancelled', 'failed', 'interrupted'].includes(
-      value.status,
-    ) &&
-    (value.error === undefined || typeof value.error === 'string') &&
-    (value.errorCode === undefined || typeof value.errorCode === 'string') &&
-    (value.target === undefined || validModelValue(value.target, parseModelRef))
-  )
-}
-
-function isSnapshot(value: unknown): value is ConversationSnapshot {
-  return (
-    isRecord(value) &&
-    isConversation(value.conversation) &&
-    Array.isArray(value.messages) &&
-    value.messages.every(isMessage) &&
-    (value.run === null ||
-      (isRun(value.run) && value.run.conversationId === value.conversation.id)) &&
-    typeof value.sequence === 'number' &&
-    Number.isSafeInteger(value.sequence) &&
-    value.sequence >= 0 &&
-    (value.model === undefined || validModelValue(value.model, parseModelStatus))
-  )
+  return parseSchema('RenameConversationRequest', value, '会话标题格式无效').title.trim()
 }
 
 export function parseServiceMeta(value: unknown): ServiceMeta {
-  if (isRecord(value) && typeof value.apiVersion === 'number' && value.apiVersion !== API_VERSION) {
+  if (isSchema('ServiceVersionInfo', value) && value.apiVersion !== API_VERSION) {
     throw new Error(`服务端 API 版本不兼容，需要 v${String(API_VERSION)}，请同步升级前后端。`)
   }
-  if (
-    !isRecord(value) ||
-    value.apiVersion !== API_VERSION ||
-    (value.engine !== 'pi' && value.engine !== 'mock') ||
-    !isRecord(value.capabilities) ||
-    typeof value.capabilities.tools !== 'boolean'
-  ) {
-    throw new Error('服务端元信息格式不兼容，请刷新页面。')
-  }
+  const meta = parseSchema('ServiceMeta', value, '服务端元信息格式不兼容，请刷新页面。')
   return {
-    ...parseModelStatus(value),
+    ...parseModelStatus(meta),
     apiVersion: API_VERSION,
-    engine: value.engine,
-    capabilities: { tools: value.capabilities.tools },
+    engine: meta.engine,
+    capabilities: { tools: meta.capabilities.tools },
   }
+}
+
+export function parseApiError(value: unknown): ApiError {
+  return parseSchema('ApiError', value, '服务端错误响应格式不兼容。')
 }
 
 export function parseConversation(value: unknown): Conversation {
-  if (!isConversation(value)) throw new Error('服务端会话格式不兼容，请刷新页面。')
-  return value
+  return parseSchema('Conversation', value, '服务端会话格式不兼容，请刷新页面。')
 }
 
 export function parseConversations(value: unknown): Conversation[] {
-  if (!Array.isArray(value) || !value.every(isConversation)) {
-    throw new Error('服务端会话列表格式不兼容，请刷新页面。')
-  }
-  return value
+  return parseSchema('Conversations', value, '服务端会话列表格式不兼容，请刷新页面。')
 }
 
 export function parseRun(value: unknown): Run {
-  if (!isRun(value)) throw new Error('服务端任务格式不兼容，请刷新页面。')
-  return value
+  return parseSchema('Run', value, '服务端任务格式不兼容，请刷新页面。')
+}
+
+function checkSnapshotIdentity(snapshot: ConversationSnapshot): void {
+  if (snapshot.run && snapshot.run.conversationId !== snapshot.conversation.id) {
+    throw new Error('服务端会话快照格式不兼容，请刷新页面。')
+  }
 }
 
 export function parseConversationSnapshot(value: unknown): ConversationSnapshot {
-  if (!isSnapshot(value)) throw new Error('服务端会话快照格式不兼容，请刷新页面。')
-  return value
+  const snapshot = parseSchema(
+    'ConversationSnapshot',
+    value,
+    '服务端会话快照格式不兼容，请刷新页面。',
+  )
+  checkSnapshotIdentity(snapshot)
+  return snapshot
 }
 
 export function parseRunEvent(value: unknown): RunEvent {
-  if (
-    !isRecord(value) ||
-    value.apiVersion !== API_VERSION ||
-    typeof value.conversationId !== 'string' ||
-    typeof value.runId !== 'string' ||
-    typeof value.sequence !== 'number' ||
-    !Number.isSafeInteger(value.sequence) ||
-    value.sequence < 0
-  ) {
-    throw new Error('服务端事件格式不兼容，请刷新页面。')
-  }
+  const event = parseSchema('RunEvent', value, '服务端事件格式不兼容，请刷新页面。')
   const base = {
-    apiVersion: API_VERSION,
-    conversationId: value.conversationId,
-    runId: value.runId,
-    sequence: value.sequence,
+    apiVersion: event.apiVersion,
+    conversationId: event.conversationId,
+    runId: event.runId,
+    sequence: event.sequence,
   }
-  if (
-    value.type === 'snapshot' &&
-    isSnapshot(value.snapshot) &&
-    value.snapshot.conversation.id === base.conversationId &&
-    value.snapshot.sequence === base.sequence
-  ) {
+  if (event.type === 'snapshot') {
+    checkSnapshotIdentity(event.snapshot)
+    if (
+      event.snapshot.conversation.id !== event.conversationId ||
+      event.snapshot.sequence !== event.sequence
+    )
+      throw new Error('服务端事件内容不完整或不兼容，请刷新页面。')
     // An old run's snapshot can contain the conversation's newer current run.
-    return { ...base, type: 'snapshot', snapshot: value.snapshot }
+    return { ...base, type: 'snapshot', snapshot: event.snapshot }
   }
-  if (
-    value.type === 'message.delta' &&
-    typeof value.messageId === 'string' &&
-    typeof value.delta === 'string'
-  ) {
-    return { ...base, type: 'message.delta', messageId: value.messageId, delta: value.delta }
-  }
-  if (value.type === 'message.completed' && isMessage(value.message)) {
-    return { ...base, type: 'message.completed', message: value.message }
-  }
-  if (
-    value.type === 'run.updated' &&
-    isRun(value.run) &&
-    value.run.id === base.runId &&
-    value.run.conversationId === base.conversationId
-  ) {
-    return { ...base, type: 'run.updated', run: value.run }
-  }
-  throw new Error('服务端事件内容不完整或不兼容，请刷新页面。')
+  if (event.type === 'message.delta')
+    return { ...base, type: 'message.delta', messageId: event.messageId, delta: event.delta }
+  if (event.type === 'message.completed')
+    return { ...base, type: 'message.completed', message: event.message }
+  if (event.run.id !== event.runId || event.run.conversationId !== event.conversationId)
+    throw new Error('服务端事件内容不完整或不兼容，请刷新页面。')
+  return { ...base, type: 'run.updated', run: event.run }
 }

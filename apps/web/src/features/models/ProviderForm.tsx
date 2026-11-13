@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { httpConstraints } from '@learn-electron/contracts/http'
 import {
   providerPresets,
+  parseCredentialHeaders,
   type EndpointInstanceView,
   type Protocol,
   type ModelAdapterView,
@@ -40,7 +42,7 @@ export function ProviderForm({
   const [name, setName] = useState(connection?.name ?? '')
   const [protocol, setProtocol] = useState<Protocol>(connection?.protocol ?? 'openai-chat')
   const [baseUrl, setBaseUrl] = useState(connection?.baseUrl ?? '')
-  const [authentication, setAuthentication] = useState<'api-key' | 'none'>(
+  const [authentication, setAuthentication] = useState<SaveProviderRequest['authentication']>(
     connection?.authentication ?? 'api-key',
   )
   const [apiKey, setApiKey] = useState('')
@@ -62,15 +64,9 @@ export function ProviderForm({
   async function save(): Promise<void> {
     setError('')
     try {
-      const value: unknown = headers.trim() ? JSON.parse(headers) : undefined
-      if (
-        value !== undefined &&
-        (value === null ||
-          typeof value !== 'object' ||
-          Array.isArray(value) ||
-          Object.values(value).some((item) => typeof item !== 'string'))
-      )
-        throw new Error('请求头请填写名称和值均为字符串的 JSON 对象。')
+      const value = headers.trim()
+        ? parseCredentialHeaders(JSON.parse(headers) as unknown)
+        : undefined
       const limitsChanged =
         contextWindow !== (connection?.models[0]?.contextWindow ?? 32768) ||
         maxOutputTokens !== (connection?.models[0]?.maxOutputTokens ?? 4096)
@@ -92,7 +88,7 @@ export function ProviderForm({
           }),
         compatibility: protocol === 'openai-chat' ? compatibility : {},
         ...(clearKey ? { apiKey: null } : apiKey ? { apiKey } : {}),
-        ...(value !== undefined ? { headers: value as Record<string, string> } : {}),
+        ...(value !== undefined ? { headers: value } : {}),
       })
       setApiKey('')
       setHeaders('')
@@ -183,7 +179,7 @@ export function ProviderForm({
                 实例名称
                 <input
                   required
-                  maxLength={100}
+                  maxLength={httpConstraints.ConnectionConfigInput.name['x-utf16-maxLength']}
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="例如：我的 DeepSeek"
@@ -217,7 +213,7 @@ export function ProviderForm({
                     aria-label="认证方式"
                     value={authentication}
                     onChange={(event) =>
-                      setAuthentication(event.target.value as 'api-key' | 'none')
+                      setAuthentication(event.target.value as SaveProviderRequest['authentication'])
                     }
                   >
                     <option value="api-key">API Key</option>
@@ -290,7 +286,7 @@ export function ProviderForm({
                     <input
                       value={vendor}
                       required
-                      maxLength={100}
+                      maxLength={httpConstraints.ConnectionConfigInput.vendor['x-utf16-maxLength']}
                       onChange={(event) => setVendor(event.target.value)}
                       placeholder="例如：openai、deepseek 或内部网关"
                     />
@@ -300,8 +296,8 @@ export function ProviderForm({
                       上下文长度
                       <input
                         type="number"
-                        min={1}
-                        max={10000000}
+                        min={httpConstraints.ModelDefinitionInput.contextWindow.minimum}
+                        max={httpConstraints.ModelDefinitionInput.contextWindow.maximum}
                         required
                         value={contextWindow}
                         onChange={(event) => setContextWindow(event.target.valueAsNumber)}
@@ -311,8 +307,11 @@ export function ProviderForm({
                       最大输出长度
                       <input
                         type="number"
-                        min={1}
-                        max={contextWindow}
+                        min={httpConstraints.ModelDefinitionInput.maxOutputTokens.minimum}
+                        max={Math.min(
+                          contextWindow,
+                          httpConstraints.ModelDefinitionInput.maxOutputTokens.maximum,
+                        )}
                         required
                         value={maxOutputTokens}
                         onChange={(event) => setMaxOutputTokens(event.target.valueAsNumber)}

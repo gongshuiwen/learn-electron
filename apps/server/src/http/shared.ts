@@ -1,10 +1,9 @@
 import type { IncomingMessage } from 'node:http'
+import { MAX_BODY_BYTES } from '@learn-electron/contracts/http'
+import type { HttpPathParameters } from '@learn-electron/contracts/http'
 import { HttpError } from './errors.ts'
 
-const MAX_BODY_BYTES = 160 * 1024
-
-export const ID_PARAM = ':id(^[\\w-]+$)'
-export type IdParams = { Params: { id: string } }
+export type IdParams<K extends keyof HttpPathParameters> = { Params: HttpPathParameters[K] }
 
 export function readJson(request: IncomingMessage): Promise<unknown> {
   if (!request.headers['content-type']?.startsWith('application/json')) {

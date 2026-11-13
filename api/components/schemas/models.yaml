@@ -1,0 +1,214 @@
+ModelId:
+  type: string
+  pattern: '^(?=.*\S)[^\u0000-\u001f\u007f]*$'
+  x-utf16-maxLength: 200
+  description: 原始 UTF-16 长度最多 200，拒绝控制字符，解析后去除首尾空白
+ModelRef:
+  type: object
+  required: [instanceId, modelId]
+  properties:
+    instanceId: { $ref: 'common.yaml#/Identifier' }
+    modelId: { $ref: '#/ModelId' }
+ModelBinding:
+  type: object
+  required: [instanceId, modelId]
+  properties:
+    instanceId: { $ref: 'common.yaml#/Identifier' }
+    modelId:
+      anyOf:
+        - { $ref: '#/ModelId' }
+        - { type: 'null' }
+ModelStatus:
+  type: object
+  required: [selection, target, model, configured]
+  properties:
+    selection:
+      anyOf:
+        - { $ref: '#/ModelRef' }
+        - { type: 'null' }
+    target:
+      anyOf:
+        - { $ref: '#/ModelRef' }
+        - { type: 'null' }
+    model:
+      type: object
+      required: [provider, id]
+      properties:
+        provider: { type: string }
+        id: { type: string }
+    configured: { type: boolean }
+    reason: { type: string }
+    authMode: { type: string, const: chatgpt }
+ServiceMeta:
+  allOf:
+    - { $ref: '#/ModelStatus' }
+    - type: object
+      required: [apiVersion, engine, capabilities]
+      properties:
+        apiVersion: { $ref: 'common.yaml#/ApiVersion' }
+        engine: { type: string, enum: [pi, mock] }
+        capabilities:
+          type: object
+          required: [tools]
+          properties:
+            tools: { type: boolean }
+Protocol:
+  type: string
+  enum: [openai-chat, openai-responses, anthropic-messages, google-generative]
+ModelDefinitionInput:
+  type: object
+  required: [id]
+  properties:
+    id: { $ref: '#/ModelId' }
+    name: { $ref: '#/ModelId' }
+    contextWindow: { type: integer, minimum: 1, maximum: 10000000, default: 32768 }
+    maxOutputTokens:
+      type: integer
+      minimum: 1
+      maximum: 10000000
+      description: 缺省为 min(4096, contextWindow)，不得超过上下文；由领域规范化检查
+ModelDefinition:
+  allOf:
+    - { $ref: '#/ModelDefinitionInput' }
+    - type: object
+      required: [name, contextWindow, maxOutputTokens]
+      properties:
+        name: { type: string }
+        contextWindow: { type: integer }
+        maxOutputTokens: { type: integer }
+ModelDefinitions:
+  type: array
+  maxItems: 200
+  items: { $ref: '#/ModelDefinition' }
+  description: 模型 ID 在 trim 后唯一；由领域校验检查
+Compatibility:
+  type: object
+  description: 缺省为空；只有 openai-chat 可以使用非空兼容选项
+  additionalProperties: false
+  properties:
+    maxTokensField: { type: string, enum: [max_tokens, max_completion_tokens] }
+    supportsDeveloperRole: { type: boolean }
+    supportsUsageInStreaming: { type: boolean }
+    supportsStore: { type: boolean }
+ConnectionConfigInput:
+  type: object
+  required: [name, protocol, baseUrl, authentication, models]
+  properties:
+    vendor:
+      type: string
+      pattern: '^(?=.*\S)[^\u0000-\u001f\u007f]*$'
+      x-utf16-maxLength: 100
+      default: custom
+    name:
+      type: string
+      pattern: '^(?=.*\S)[^\u0000-\u001f\u007f]*$'
+      x-utf16-maxLength: 100
+    protocol: { $ref: '#/Protocol' }
+    baseUrl:
+      type: string
+      pattern: '^(?=.*\S)[^\u0000-\u001f\u007f]*$'
+      x-utf16-maxLength: 2000
+      description: HTTP(S) 地址，无用户名、密码、查询和片段；解析后移除末尾斜杠
+    authentication:
+      type: string
+      enum: [api-key, none]
+      description: none 仅适用于 OpenAI 兼容协议
+    models:
+      type: array
+      maxItems: 200
+      items: { $ref: '#/ModelDefinitionInput' }
+    compatibility: { $ref: '#/Compatibility' }
+ConnectionConfig:
+  allOf:
+    - { $ref: '#/ConnectionConfigInput' }
+    - type: object
+      required: [vendor, compatibility, models]
+      properties:
+        vendor: { type: string }
+        compatibility: { $ref: '#/Compatibility' }
+        models: { $ref: '#/ModelDefinitions' }
+CredentialHeaders:
+  type: object
+  maxProperties: 20
+  propertyNames:
+    pattern: "^[!#$%&'*+.^_`|~A-Za-z0-9-]+$"
+  additionalProperties:
+    type: string
+    pattern: '^[^\u0000-\u001f\u007f]*$'
+    x-utf16-maxLength: 8192
+  description: |
+    值按字面量处理；缺省保留，空对象清除。拒绝 Host、Content-Length、Connection、
+    Transfer-Encoding、Proxy-Authorization、__proto__、constructor、prototype（忽略大小写），
+    由领域校验检查。仅写入，不出现在读取 DTO 中。
+SaveProviderRequest:
+  allOf:
+    - { $ref: '#/ConnectionConfigInput' }
+    - type: object
+      properties:
+        apiKey:
+          anyOf:
+            - type: string
+              pattern: '^(?=.*\S)[^\u0000-\u001f\u007f]*$'
+              x-utf16-maxLength: 8192
+            - { type: 'null' }
+          description: 缺省保留，字符串替换，null 清除；按字面量保存
+        headers: { $ref: '#/CredentialHeaders' }
+CreateProviderRequest:
+  anyOf:
+    - { $ref: '#/SaveProviderRequest' }
+    - { $ref: 'chatgpt.yaml#/CreateChatGPTProviderRequest' }
+EndpointInstanceView:
+  allOf:
+    - { $ref: '#/ConnectionConfig' }
+    - type: object
+      required: [id, kind, revision, hasCredential, hasHeaders]
+      properties:
+        id: { $ref: 'common.yaml#/Identifier' }
+        kind: { type: string, const: endpoint }
+        revision: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        hasCredential: { type: boolean }
+        hasHeaders: { type: boolean }
+ProviderInstanceView:
+  oneOf:
+    - { $ref: '#/EndpointInstanceView' }
+    - { $ref: 'chatgpt.yaml#/ChatGPTInstanceView' }
+ProvidersState:
+  type: object
+  required: [defaultSelection, instances, chatgpt]
+  properties:
+    defaultSelection:
+      anyOf:
+        - { $ref: '#/ModelRef' }
+        - { type: 'null' }
+    instances:
+      type: array
+      items: { $ref: '#/ProviderInstanceView' }
+    chatgpt:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+        pendingLogin:
+          allOf:
+            - { $ref: 'chatgpt.yaml#/ChatGPTLogin' }
+            - type: object
+              properties:
+                status: { type: string, const: pending }
+ModelAdapterView:
+  type: object
+  required: [id, name, authentication]
+  properties:
+    id: { $ref: '#/Protocol' }
+    name: { type: string }
+    authentication:
+      type: array
+      minItems: 1
+      items: { type: string, enum: [api-key, none] }
+ModelAdapters:
+  type: array
+  items: { $ref: '#/ModelAdapterView' }
+ProviderTestRequest:
+  type: object
+  required: [modelId]
+  properties:
+    modelId: { $ref: '#/ModelId' }

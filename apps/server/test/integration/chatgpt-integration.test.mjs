@@ -10,6 +10,7 @@ import { ChatService } from '../../src/chat/index.ts'
 import { ConnectionStorage } from '../../src/chatgpt/storage.ts'
 import { ProtectedFile } from '../../src/shared/index.ts'
 import { oauthFixture } from '../helpers/chatgpt.mjs'
+import { assertApiResponse } from '../helpers/contracts.mjs'
 
 test(
   'HTTP OAuth and explicit model selection preserve Pi context across restart and account changes without API-key fallback',
@@ -43,8 +44,8 @@ test(
     })
     await starting
     t.signal.throwIfAborted()
-    function request(path, method = 'GET', body) {
-      return fetch(`${backend.url}/api/v1${path}`, {
+    async function request(path, method = 'GET', body) {
+      const response = await fetch(`${backend.url}/api/v1${path}`, {
         method,
         signal: t.signal,
         headers: {
@@ -53,6 +54,7 @@ test(
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
       })
+      return assertApiResponse(response, path, method)
     }
     async function login(subject) {
       const providers = await (

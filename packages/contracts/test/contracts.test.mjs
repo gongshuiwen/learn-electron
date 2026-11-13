@@ -54,7 +54,11 @@ test('start requests normalize message text and retain the idempotency key', () 
   assert.equal(parseStartRun({ message: 'x', requestId: 'a'.repeat(8) }).requestId.length, 8)
   const expectedTarget = { instanceId: 'provider-a', modelId: 'model-a' }
   assert.deepEqual(
-    parseStartRun({ message: 'hello', requestId: 'request-0001', expectedTarget }).expectedTarget,
+    parseStartRun({
+      message: 'hello',
+      requestId: 'request-0001',
+      expectedTarget: { ...expectedTarget, modelId: ' model-a ', extra: true },
+    }).expectedTarget,
     expectedTarget,
   )
 })
@@ -85,6 +89,15 @@ test('titles are trimmed and must fit the public length limit', () => {
   }
 })
 
+test('generated text bounds preserve UTF-16 lengths and the existing order of trimming', () => {
+  const requestId = 'request-unicode'
+  assert.equal(parseStartRun({ message: '😀'.repeat(16_000), requestId }).message.length, 32_000)
+  assert.throws(() => parseStartRun({ message: '😀'.repeat(16_001), requestId }))
+  assert.throws(() => parseStartRun({ message: ' ' + 'x'.repeat(32_000), requestId }))
+  assert.equal(parseTitle({ title: '  ' + '😀'.repeat(50) + '  ' }).length, 100)
+  assert.throws(() => parseTitle({ title: '😀'.repeat(51) }))
+})
+
 test('service metadata validates its version, model and capabilities', () => {
   const meta = {
     apiVersion: API_VERSION,
@@ -96,12 +109,29 @@ test('service metadata validates its version, model and capabilities', () => {
     capabilities: { tools: false },
   }
   assert.deepEqual(parseServiceMeta(meta), meta)
+  const ref = { instanceId: 'provider', modelId: ' model ', extra: true }
+  assert.deepEqual(
+    parseServiceMeta({
+      ...meta,
+      selection: ref,
+      target: ref,
+      model: { ...meta.model, token: 'test-only-token' },
+      capabilities: { tools: false, extra: true },
+      apiKey: 'test-only-key',
+    }),
+    {
+      ...meta,
+      selection: { instanceId: 'provider', modelId: 'model' },
+      target: { instanceId: 'provider', modelId: 'model' },
+    },
+  )
   assert.throws(() => parseServiceMeta({ ...meta, apiVersion: API_VERSION + 1 }), /API 版本不兼容/)
   for (const value of [
     null,
     { ...meta, engine: 'unknown' },
     { ...meta, model: { provider: 'test' } },
     { ...meta, configured: 'false' },
+    { ...meta, target: { instanceId: 'provider', modelId: 1 } },
     { ...meta, capabilities: { tools: 0 } },
   ]) {
     assert.throws(() => parseServiceMeta(value), /格式不兼容/)

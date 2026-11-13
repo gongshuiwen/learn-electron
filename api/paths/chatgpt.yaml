@@ -1,0 +1,48 @@
+loginAttempts:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  post:
+    operationId: beginProviderLogin
+    summary: 为指定 ChatGPT 实例开始授权，不修改默认选择
+    responses:
+      '201':
+        description: 不含令牌的登录进度
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chatgpt.yaml#/ChatGPTLogin' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+logout:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  post:
+    operationId: logoutProvider
+    summary: 注销指定实例，只取消它的活动任务
+    responses:
+      '200':
+        description: 本地退出已完成；revoked 表示远程撤销是否确认
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chatgpt.yaml#/LogoutResult' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+loginAttempt:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  get:
+    operationId: getLoginAttempt
+    summary: 读取登录进度，旧尝试返回 404 login_not_found
+    responses:
+      '200':
+        description: 登录进度
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/chatgpt.yaml#/ChatGPTLogin' }
+      default: { $ref: '../components/responses.yaml#/ApiError' }
+cancelLogin:
+  parameters:
+    - { $ref: '../components/parameters.yaml#/ResourceId' }
+  post:
+    operationId: cancelLoginAttempt
+    summary: 取消登录，旧尝试返回 404 login_not_found
+    responses:
+      '204': { description: 已取消，无正文 }
+      default: { $ref: '../components/responses.yaml#/ApiError' }

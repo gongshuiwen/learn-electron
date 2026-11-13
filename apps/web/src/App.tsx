@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { httpConstraints } from '@learn-electron/contracts/http'
 import {
   ArrowUp,
   Check,
@@ -189,7 +190,9 @@ export default function App() {
               <input
                 id="conversation-title"
                 autoFocus
-                maxLength={100}
+                maxLength={
+                  httpConstraints.RenameConversationRequest.title['x-trimmed-utf16-maxLength']
+                }
                 value={editingTitle}
                 onChange={(event) => setEditingTitle(event.currentTarget.value)}
                 className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-transparent px-3 py-2 text-sm dark:border-stone-700"
@@ -318,7 +321,7 @@ export default function App() {
               <textarea
                 id="message"
                 rows={2}
-                maxLength={32000}
+                maxLength={httpConstraints.StartRunRequest.message['x-utf16-maxLength']}
                 value={draft}
                 placeholder={
                   chat.model?.configured === false ? '请先配置模型连接…' : '写下你的问题…'
