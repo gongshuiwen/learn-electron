@@ -62,6 +62,167 @@ async function rename(page, title) {
   await page.getByRole('textbox', { name: '对话标题' }).waitFor({ state: 'hidden' })
 }
 
+const catalogPath = '/api/v1/model-providers/account-a/models'
+
+async function modelFixture(t) {
+  const account = {
+    id: 'account-a',
+    kind: 'chatgpt',
+    vendor: 'openai',
+    name: 'Account A',
+    status: 'connected',
+    planUsage: true,
+  }
+  const model = { id: 'model-a', name: 'Model A', contextWindow: 32768, maxOutputTokens: 4096 }
+  const catalog = { models: [model] }
+  const selection = { instanceId: account.id, modelId: model.id }
+  const { page } = await fixture(t, (api) => {
+    const handle = api.handle.bind(api)
+    api.handle = async (route) => {
+      if (route.request().method() !== 'GET') return handle(route)
+      const path = new URL(route.request().url()).pathname
+      if (path === '/api/v1/meta')
+        return route.fulfill({
+          json: {
+            apiVersion: 1,
+            engine: 'pi',
+            model: { provider: 'test', id: model.id },
+            configured: account.status === 'connected',
+            selection,
+            target: selection,
+            capabilities: { tools: false },
+          },
+        })
+      if (path === '/api/v1/model-providers')
+        return route.fulfill({
+          json: {
+            defaultSelection: selection,
+            chatgpt: { enabled: true },
+            instances: [account],
+          },
+        })
+      if (path === catalogPath) return route.fulfill({ json: await catalog.models })
+      return handle(route)
+    }
+  })
+  return { page, account, model, catalog }
+}
+
+test('Web cancels picker reads and recovers on reopen', { timeout: 20_000 }, async (t) => {
+  const { page, model, catalog } = await modelFixture(t)
+  const gate = Promise.withResolvers()
+  catalog.models = gate.promise
+  try {
+    const reading = page.waitForRequest('**' + catalogPath)
+    await page.getByRole('button', { name: '选择聊天模型', exact: true }).click()
+    await reading
+    const cancelled = page.waitForEvent('requestfailed', {
+      predicate: (request) => request.url().endsWith(catalogPath),
+    })
+    await page.keyboard.press('Escape')
+    await cancelled
+    gate.resolve([model])
+    await page.getByRole('button', { name: '选择聊天模型', exact: true }).click()
+    await page.getByText(model.name, { exact: true }).waitFor({ state: 'attached' })
+  } finally {
+    gate.resolve([model])
+  }
+})
+
+test('Web recovers model queries and shows refresh errors', { timeout: 20_000 }, async (t) => {
+  const { page, model, catalog } = await modelFixture(t)
+  await page.route(
+    '**/api/v1/model-providers',
+    (route) =>
+      route.fulfill({
+        status: 503,
+        json: { error: { code: 'unavailable', message: '暂时无法读取供应商' } },
+      }),
+    { times: 1 },
+  )
+  await page.getByRole('link', { name: '设置', exact: true }).click()
+  await page.getByText('无法读取供应商。', { exact: true }).waitFor()
+  await page.getByRole('link', { name: '返回聊天', exact: true }).click()
+  await page.getByRole('link', { name: '设置', exact: true }).click()
+  await page.getByText(model.name, { exact: true }).waitFor({ state: 'attached' })
+  const gate = Promise.withResolvers()
+  catalog.models = gate.promise
+  await page.route('**/api/v1/model-providers/account-a/test', (route) =>
+    route.fulfill({ status: 204 }),
+  )
+  try {
+    await page.getByRole('link', { name: '返回聊天', exact: true }).click()
+    const reading = page.waitForRequest('**' + catalogPath)
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await reading
+    await page.getByRole('button', { name: '测试连接', exact: true }).click()
+    await page.getByText('连接测试成功。', { exact: true }).waitFor()
+    gate.resolve({ invalid: true })
+    await page.getByText('模型目录暂不可用，请点击获取模型重试。', { exact: true }).waitFor()
+    assert.equal(await page.getByText('连接测试成功。', { exact: true }).isVisible(), true)
+    await page.getByRole('link', { name: '返回聊天', exact: true }).click()
+    await page.getByRole('button', { name: '选择聊天模型', exact: true }).click()
+    await page.getByText('无法读取模型目录，请重试或前往设置。', { exact: true }).waitFor()
+    assert.equal(await page.getByLabel('聊天模型', { exact: true }).isDisabled(), true)
+  } finally {
+    gate.resolve({ invalid: true })
+  }
+})
+
+test('Web cancels reads when an account signs out', { timeout: 20_000 }, async (t) => {
+  const { page, account, model, catalog } = await modelFixture(t)
+  const gate = Promise.withResolvers()
+  catalog.models = gate.promise
+  await page.route('**/api/v1/model-providers/account-a/auth/logout', (route) => {
+    account.status = 'signed_out'
+    account.planUsage = false
+    return route.fulfill({ json: { revoked: true } })
+  })
+  try {
+    const reading = page.waitForRequest('**' + catalogPath)
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await reading
+    const cancelled = page.waitForEvent('requestfailed', {
+      predicate: (request) => request.url().endsWith(catalogPath),
+    })
+    await page.getByRole('button', { name: '退出登录', exact: true }).click()
+    await cancelled
+    gate.resolve([model])
+    await page.getByText('请先完成 ChatGPT 授权，再选择模型。', { exact: true }).waitFor()
+    assert.equal(await page.getByLabel('当前模型').isDisabled(), true)
+  } finally {
+    gate.resolve([model])
+  }
+})
+
+test('Web preserves a refreshed catalog against older reads', { timeout: 20_000 }, async (t) => {
+  const { page, model, catalog } = await modelFixture(t)
+  const refreshed = { ...model, id: 'model-refreshed', name: 'Model refreshed' }
+  const gate = Promise.withResolvers()
+  catalog.models = gate.promise
+  await page.route('**/api/v1/model-providers/account-a/models/refresh', (route) => {
+    catalog.models = [refreshed]
+    return route.fulfill({ json: catalog.models })
+  })
+  try {
+    const reading = page.waitForRequest('**' + catalogPath)
+    await page.getByRole('link', { name: '设置', exact: true }).click()
+    await reading
+    const cancelled = page.waitForEvent('requestfailed', {
+      predicate: (request) => request.url().endsWith(catalogPath),
+    })
+    await page.getByRole('button', { name: '获取模型', exact: true }).click()
+    await cancelled
+    gate.resolve([model])
+    const select = page.getByLabel('当前模型')
+    await page.getByText(refreshed.name, { exact: true }).waitFor({ state: 'attached' })
+    assert.equal(await select.inputValue(), '', 'A missing default model is not silently replaced')
+    assert.equal(await page.getByRole('button', { name: '设为默认模型' }).isDisabled(), true)
+  } finally {
+    gate.resolve([model])
+  }
+})
+
 for (const operation of ['polling', 'cancelling']) {
   test(
     `Web recovers a missing ChatGPT login while ${operation}`,
@@ -394,6 +555,7 @@ test(
         return handle(route)
       }
     })
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
     await page.getByRole('link', { name: '设置', exact: true }).click()
     await page
       .getByRole('combobox', { name: '当前模型', exact: true })
@@ -433,6 +595,37 @@ test(
       await page.getByRole('textbox', { name: '发送消息', exact: true }).isDisabled(),
       false,
     )
+    const gate = Promise.withResolvers()
+    let reply
+    await page.route('**' + catalogPath, (route) => {
+      reply = gate.promise.then(() =>
+        route.fulfill({
+          json: [{ id: 'late-a', name: 'Late A', contextWindow: 32768, maxOutputTokens: 4096 }],
+        }),
+      )
+      return reply
+    })
+    try {
+      const reading = page.waitForRequest('**' + catalogPath)
+      await page.getByRole('button', { name: '选择聊天模型', exact: true }).click()
+      const picker = page.getByRole('dialog', { name: '聊天模型选择', exact: true })
+      await picker.getByLabel('供应商实例').selectOption('account-a')
+      await reading
+      assert.equal(
+        await picker.getByLabel('聊天模型').inputValue(),
+        'model-account-a',
+        'The picker reuses the settings catalog while refreshing it',
+      )
+      await picker.getByLabel('供应商实例').selectOption('account-b')
+      await picker.getByText('该实例尚未授权，请前往设置更新凭据。', { exact: true }).waitFor()
+      gate.resolve()
+      await reply
+      assert.equal(await picker.getByLabel('聊天模型').inputValue(), '')
+      assert.equal(selections.length, 2, 'Offline browsing and late catalogs never change defaults')
+    } finally {
+      gate.resolve()
+      await reply
+    }
   },
 )
 

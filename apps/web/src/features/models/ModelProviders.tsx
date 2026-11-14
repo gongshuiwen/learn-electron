@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   parseProvidersState,
   parseModels,
-  parseModelAdapters,
   providerPresets,
-  type ModelAdapterView,
   type ProvidersState,
   type EndpointInstanceView,
-  type ModelDefinition,
   type SaveProviderRequest,
 } from '@learn-electron/contracts/models'
 import { Button } from '@/components/ui/button'
@@ -15,19 +13,21 @@ import { request } from '@/lib/api'
 import { ChatGPTConnection } from '@/features/chatgpt/ChatGPTConnection'
 import { useChatGPTConnection } from '@/features/chatgpt/use-chatgpt-connection'
 import { ProviderForm } from './ProviderForm'
+import { adaptersQuery, providerModelsQuery, providersQuery } from './queries'
 
 export function ModelProviders({
   onChanged,
   activeInstanceId,
-  failureKey,
 }: {
   onChanged: () => Promise<void>
   activeInstanceId: string | undefined
-  failureKey: string | undefined
 }) {
-  const [state, setState] = useState<ProvidersState | null>(null)
+  const queryClient = useQueryClient()
+  const providers = useQuery(providersQuery)
+  const adapterResult = useQuery(adaptersQuery)
+  const adapters = adapterResult.data ?? []
+  const state = providers.data
   const [draft, setDraft] = useState<{ instanceId: string; modelId?: string } | null>(null)
-  const [catalog, setCatalog] = useState<{ id: string; models: ModelDefinition[] } | null>(null)
   const [editing, setEditing] = useState<EndpointInstanceView | null | undefined>(undefined)
   const [initialPreset, setInitialPreset] = useState<'custom' | 'chatgpt'>('custom')
   const [operation, setOperation] = useState<
@@ -36,23 +36,26 @@ export function ModelProviders({
   const busy = operation !== null
   const [notice, setNotice] = useState('')
   const [deleting, setDeleting] = useState(false)
-  const [adapters, setAdapters] = useState<ModelAdapterView[]>([])
   const selection = state?.defaultSelection
   const currentConnectionId = selection?.instanceId
   const selectedId = draft?.instanceId ?? currentConnectionId ?? state?.instances[0]?.id
   const selected = state?.instances.find(({ id }) => id === selectedId)
   const account = selected?.kind === 'chatgpt' ? selected : null
-  const accountId = account?.id
   const accountReady = account?.status === 'connected' && account.planUsage
-  const pendingLoginId = state?.chatgpt.pendingLogin?.id
+  const catalog = useQuery({
+    ...providerModelsQuery(accountReady ? account.id : ''),
+    enabled: Boolean(accountReady),
+  })
+  const queryError =
+    providers.error || adapterResult.error
+      ? '无法读取模型连接，请稍后重试。'
+      : catalog.error
+        ? '模型目录暂不可用，请点击获取模型重试。'
+        : ''
   const disabled = busy
   const selectedBusy = selectedId === activeInstanceId
   const models =
-    selected?.kind === 'endpoint'
-      ? selected.models
-      : accountReady && catalog && catalog.id === selectedId
-        ? catalog.models
-        : []
+    selected?.kind === 'endpoint' ? selected.models : accountReady ? (catalog.data ?? []) : []
   const wanted =
     draft?.modelId ??
     (selection && selection.instanceId === selectedId ? selection.modelId : undefined)
@@ -85,15 +88,15 @@ export function ModelProviders({
   } else if (!modelId) modelHint = '当前模型不可用，请重新选择。'
 
   const refresh = useCallback(
-    (signal?: AbortSignal) =>
-      request('/model-providers', parseProvidersState, signal ? { signal } : {}).then(
-        async (next) => {
-          if (signal?.aborted) return
-          setState(next)
-          await onChanged()
-        },
-      ),
-    [onChanged],
+    async (signal?: AbortSignal) => {
+      if (signal?.aborted) return
+      await queryClient.invalidateQueries(
+        { queryKey: providersQuery.queryKey },
+        { throwOnError: true },
+      )
+      if (!signal?.aborted) await onChanged()
+    },
+    [queryClient, onChanged],
   )
 
   const connected = useCallback((instanceId: string) => {
@@ -119,11 +122,12 @@ export function ModelProviders({
 
   const loginCreated = useCallback(
     (providers: ProvidersState, instanceId: string) => {
-      setState(providers)
+      void queryClient.cancelQueries({ queryKey: providersQuery.queryKey })
+      queryClient.setQueryData(providersQuery.queryKey, providers)
       connected(instanceId)
       setEditing(undefined)
     },
-    [connected],
+    [queryClient, connected],
   )
 
   const chatgpt = useChatGPTConnection({
@@ -132,32 +136,6 @@ export function ModelProviders({
     onCreated: loginCreated,
     onConnected: loginConnected,
   })
-
-  useEffect(() => {
-    const controller = new AbortController()
-    void Promise.all([
-      refresh(controller.signal),
-      request('/model-adapters', parseModelAdapters, { signal: controller.signal }).then(
-        setAdapters,
-      ),
-    ]).catch(() => {
-      if (!controller.signal.aborted) setNotice('无法读取模型连接，请稍后重试。')
-    })
-    return () => controller.abort()
-  }, [refresh, failureKey])
-
-  useEffect(() => {
-    if (!accountId || !accountReady) return
-    const controller = new AbortController()
-    void request(`/model-providers/${accountId}/models`, parseModels, { signal: controller.signal })
-      .then((models) => {
-        if (!controller.signal.aborted) setCatalog({ id: accountId, models })
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setNotice('模型目录暂不可用，请点击获取模型重试。')
-      })
-    return () => controller.abort()
-  }, [accountId, accountReady, pendingLoginId, failureKey])
 
   async function act(
     action: 'default' | 'models' | 'test' | 'delete',
@@ -195,7 +173,8 @@ export function ModelProviders({
             (item) =>
               item.kind === 'endpoint' && !state?.instances.some(({ id }) => id === item.id),
           )
-      setState(saved)
+      await queryClient.cancelQueries({ queryKey: providersQuery.queryKey })
+      queryClient.setQueryData(providersQuery.queryKey, saved)
       if (entry) connected(entry.id)
       await onChanged().catch(() => setNotice('连接已保存，但聊天状态刷新失败，请重新打开设置。'))
     } finally {
@@ -222,6 +201,11 @@ export function ModelProviders({
           添加提供商
         </Button>
       </header>
+      {queryError ? (
+        <p role="status" className="provider-notice">
+          {queryError}
+        </p>
+      ) : null}
       {state ? (
         <p role="status" className="provider-default">
           {selection
@@ -235,7 +219,9 @@ export function ModelProviders({
       ) : null}
       <div className={state?.instances.length ? 'provider-layout' : undefined}>
         <nav className="provider-list" aria-label="供应商实例">
-          {!state ? <p role="status">{notice ? '无法读取供应商。' : '正在读取供应商…'}</p> : null}
+          {!state ? (
+            <p role="status">{providers.error ? '无法读取供应商。' : '正在读取供应商…'}</p>
+          ) : null}
           {state?.instances.length === 0 ? (
             <div className="provider-empty">
               <p>还没有供应商</p>
@@ -402,7 +388,11 @@ export function ModelProviders({
                         parseModels,
                         { method: 'POST' },
                       )
-                      setCatalog({ id: selected.id, models })
+                      if (selected.kind === 'chatgpt') {
+                        const { queryKey } = providerModelsQuery(selected.id)
+                        await queryClient.cancelQueries({ queryKey })
+                        queryClient.setQueryData(queryKey, models)
+                      }
                       setNotice('模型列表已更新。')
                     })
                   }

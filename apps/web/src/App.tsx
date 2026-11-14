@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { httpConstraints } from '@learn-electron/contracts/http'
 import {
   ArrowUp,
@@ -19,6 +20,7 @@ import { MessageList } from '@/features/chat/MessageList'
 import { useChat } from '@/features/chat/use-chat'
 import { platform } from '@/platform'
 import { ModelPicker } from '@/features/models/ModelPicker'
+import { modelQueryKey } from '@/features/models/queries'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 
 function isSettingsPage(): boolean {
@@ -27,6 +29,7 @@ function isSettingsPage(): boolean {
 
 export default function App() {
   const chat = useChat()
+  const queryClient = useQueryClient()
   const [settingsPage, setSettingsPage] = useState(isSettingsPage)
   const [draft, setDraft] = useState('')
   const [editingTitle, setEditingTitle] = useState<string | null>(null)
@@ -39,12 +42,15 @@ export default function App() {
     const navigate = () => {
       const settings = isSettingsPage()
       setSettingsPage(settings)
-      // Recheck the selected model when returning to chat.
-      if (!settings) void refreshMeta().catch(() => {})
+      void refreshMeta().catch(() => {})
     }
     window.addEventListener('hashchange', navigate)
     return () => window.removeEventListener('hashchange', navigate)
   }, [refreshMeta])
+
+  useEffect(() => {
+    if (run?.status === 'failed') void queryClient.invalidateQueries({ queryKey: modelQueryKey })
+  }, [queryClient, run?.id, run?.status])
 
   async function send(): Promise<void> {
     const message = draft.trim()
@@ -129,7 +135,6 @@ export default function App() {
           onChanged={chat.refreshMeta}
           activeRun={chat.active}
           activeInstanceId={chat.active ? run?.target?.instanceId : undefined}
-          failureKey={run?.status === 'failed' ? run.id : undefined}
         />
       ) : (
         <main className="chat-panel">

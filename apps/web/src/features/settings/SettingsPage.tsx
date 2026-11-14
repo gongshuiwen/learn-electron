@@ -11,7 +11,6 @@ export function SettingsPage({
   onChanged,
   activeRun,
   activeInstanceId,
-  failureKey,
 }: {
   engine: ServiceMeta['engine'] | undefined
   error: string | null
@@ -19,7 +18,6 @@ export function SettingsPage({
   onChanged: () => Promise<void>
   activeRun: boolean
   activeInstanceId: string | undefined
-  failureKey: string | undefined
 }) {
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
@@ -48,11 +46,7 @@ export function SettingsPage({
             </p>
           ) : null}
           {engine === 'pi' ? (
-            <ModelProviders
-              onChanged={onChanged}
-              activeInstanceId={activeInstanceId}
-              failureKey={failureKey}
-            />
+            <ModelProviders onChanged={onChanged} activeInstanceId={activeInstanceId} />
           ) : (
             <section className="settings-section space-y-4" aria-label="模型设置">
               <h2>模型连接</h2>
